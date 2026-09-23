@@ -1,0 +1,16 @@
+# Python virtual environment
+.venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Environment variables / secrets
+.env
+
+# Runtime logs
+logs/
+
+# Raw downloaded data
+# Raw GH Archive files belong in AWS S3, not GitHub.
+data/
