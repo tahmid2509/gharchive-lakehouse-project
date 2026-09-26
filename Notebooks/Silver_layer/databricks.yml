@@ -1,0 +1,114 @@
+# Run bundle commands from Notebooks/Silver_layer. No root-repository changes needed.
+bundle:
+  name: gharchive-silver
+
+variables:
+  catalog:
+    default: github_lakehouse
+  silver_schema:
+    default: silver
+  bronze_table:
+    default: github_lakehouse.bronze.github_events_raw
+  source_start_date:
+    default: ""
+  source_end_date:
+    default: ""
+  source_file_name:
+    default: ""
+  max_bytes_per_trigger:
+    default: 1g
+  expected_source_files:
+    description: "0 reports coverage; a positive value enforces the chosen scope."
+    default: "0"
+  max_quarantine_rows:
+    description: "-1 reports all contract failures; 2 is an optional full-week baseline gate."
+    default: "-1"
+
+workspace:
+  root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+
+sync:
+  exclude:
+    - 05_silver_data_profiling.ipynb
+    - tests/**
+    - __pycache__/**
+    - .pytest_cache/**
+
+resources:
+  pipelines:
+    silver_pipeline:
+      name: gharchive-silver-${bundle.target}
+      catalog: ${var.catalog}
+      schema: ${var.silver_schema}
+      root_path: .
+      serverless: true
+      continuous: false
+      development: false
+      channel: CURRENT
+      edition: ADVANCED
+      photon: true
+      libraries:
+        - notebook:
+            path: ./07_silver_pipeline.py
+      configuration:
+        silver.source_path: ${workspace.file_path}
+        silver.bronze_table: ${var.bronze_table}
+        silver.source_start_date: ${var.source_start_date}
+        silver.source_end_date: ${var.source_end_date}
+        silver.source_file_name: ${var.source_file_name}
+        silver.max_bytes_per_trigger: ${var.max_bytes_per_trigger}
+
+  jobs:
+    silver_job:
+      name: gharchive-silver-${bundle.target}
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+      timeout_seconds: 14400
+      tasks:
+        - task_key: preflight
+          max_retries: 0
+          notebook_task:
+            notebook_path: ./06_silver_preflight.py
+            base_parameters:
+              source_path: ${workspace.file_path}
+              bronze_table: ${var.bronze_table}
+              source_start_date: ${var.source_start_date}
+              source_end_date: ${var.source_end_date}
+              source_file_name: ${var.source_file_name}
+              expected_source_files: ${var.expected_source_files}
+        - task_key: silver_pipeline
+          depends_on:
+            - task_key: preflight
+          max_retries: 1
+          min_retry_interval_millis: 60000
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.silver_pipeline.id}
+            full_refresh: false
+        - task_key: validate_silver
+          depends_on:
+            - task_key: silver_pipeline
+          max_retries: 0
+          notebook_task:
+            notebook_path: ./08_silver_validation.py
+            base_parameters:
+              source_path: ${workspace.file_path}
+              bronze_table: ${var.bronze_table}
+              catalog: ${var.catalog}
+              silver_schema: ${var.silver_schema}
+              source_start_date: ${var.source_start_date}
+              source_end_date: ${var.source_end_date}
+              source_file_name: ${var.source_file_name}
+              bronze_version: "{{tasks.preflight.values.bronze_version}}"
+              max_quarantine_rows: ${var.max_quarantine_rows}
+
+targets:
+  dev:
+    default: true
+    variables:
+      silver_schema: silver_dev
+      source_file_name: 2024-02-01-0.json.gz
+      expected_source_files: "1"
+  prod:
+    variables:
+      silver_schema: silver
