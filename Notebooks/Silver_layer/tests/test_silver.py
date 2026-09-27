@@ -189,3 +189,10 @@ def test_python_and_deployment_graph():
         if "notebook_task" in task:
             assert (ROOT / task["notebook_task"]["notebook_path"]).exists()
     assert config["targets"]["dev"]["variables"]["silver_schema"] == "silver_dev"
+    pilot = config["targets"]["day_test"]["variables"]
+    assert pilot == {"silver_schema": "silver_day_test", "source_start_date": "2024-02-01",
+                     "source_end_date": "2024-02-01", "source_file_name": "",
+                     "expected_source_files": "24", "pilot_audit": "true"}
+    assert config["targets"]["prod"]["variables"]["silver_schema"] == "silver"
+    assert "${bundle.target}" in config["workspace"]["root_path"]
+    assert "${bundle.target}" in pipeline["name"]

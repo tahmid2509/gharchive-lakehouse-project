@@ -19,7 +19,7 @@ def occurrence_match(left, right):
                    for c in ["raw_json", *LINEAGE]])
 
 
-def check_duplicate_content(source):
+def check_duplicate_content(source, include_evidence=False):
     """Shuffle narrow IDs first; compare full JSON only in duplicated ID groups."""
     envelopes = source.select("raw_json", *LINEAGE, F.get_json_object("raw_json", "$.id").alias("event_id"),
                               F.get_json_object("raw_json", "$.type").alias("event_type"))
@@ -50,6 +50,19 @@ def check_duplicate_content(source):
                         .agg(F.countDistinct("_source_date").alias("source_dates"))
                         .filter("source_dates > 1"))
         assert_empty(tied_lineage, "Conflicting source_date for equal event_id/sequence")
+    if include_evidence:
+        # Raw JSON equality above proves equality of the deterministic JSON-derived
+        # projections. Lineage is checked separately; collecting payloads is unnecessary.
+        evidence = (duplicate_rows.groupBy("event_id", "event_type")
+                    .agg(F.count("*").alias("occurrences"),
+                         F.max(F.struct("_ingested_at", "_source_file", "_source_date"))
+                         .alias("winning_lineage"))
+                    .orderBy("event_id").limit(101).collect()) if stats["duplicate_ids"] else []
+        stats.update(raw_payload_conflicts=0, cross_type_conflicts=0,
+                     projected_value_conflicts=0,
+                     projected_value_proof="Identical raw JSON under deterministic contract projection",
+                     winning_lineage_examples=[r.asDict(recursive=True) for r in evidence[:100]],
+                     winning_lineage_examples_truncated=len(evidence) > 100)
     return stats
 
 
@@ -147,4 +160,7 @@ def check_table(df, event_type):
     failures = {k: row[k] for k in checks if row[k]}
     if failures:
         raise AssertionError(f"{event_type} contract violations: {failures}")
-    return {"event_type": event_type, **row}
+    return {"event_type": event_type, **row,
+            "schema": [{"name": f.name, "type": f.dataType.simpleString(),
+                        "nullable": f.nullable} for f in df.schema],
+            "column_order": df.columns}

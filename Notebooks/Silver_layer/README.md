@@ -9,10 +9,14 @@ This folder builds the nine Silver tables defined in `05_silver_data_profiling.i
 | `06_silver_preflight.py` | Job notebook: verify Bronze schema/scope and inspect every duplicate-ID group for payload/type conflicts. |
 | `07_silver_pipeline.py` | The only Lakeflow pipeline library: source router, nine typed event branches, quarantine, and keyed Silver outputs. |
 | `08_silver_validation.py` | Job notebook: schema and quality checks, quarantine verification, exact key reconciliation and winner-lineage verification. |
+| `09_pilot_performance.py` | Run manually after either pilot: query the selected pipeline update, plans, optional Job timings, and current table storage. |
 | `silver_contract.py` | Explicit narrow JSON schemas, field mappings, casts, normalization, and shared quality rules. |
 | `silver_validation.py` | Batch audit functions. |
+| `silver_pilot_audit.py` | Source inventory, semantic measurements, quarantine evidence, and comparison of two validation reports. |
 | `databricks.yml` | Complete deployable pipeline and three-task Job configuration. |
 | `tests/test_silver.py` | Spark fixture tests and deployment graph checks. |
+| `tests/test_pilot_audit.py` | Focused tests for the additional evidence queries. |
+| `PILOT_RUNBOOK.md` | Workspace deployment, first run, second run, performance collection, and interpretation. |
 
 The numbered `.py` files are Databricks source notebooks. Importing/pulling them into a Databricks Git folder displays them as notebooks. Helper `.py` files are ordinary Python modules.
 
@@ -59,7 +63,7 @@ Quarantine preserves each invalid Bronze occurrence and raw JSON. `failure_reaso
 
 - Unity Catalog workspace with the `github_lakehouse` catalog and existing Bronze Delta table.
 - Serverless Lakeflow pipelines and serverless Jobs available to the run identity. The bundle uses `CURRENT`, triggered mode (`continuous: false`), Advanced edition, Photon, and production execution mode (`development: false`). Use the current Databricks `pyspark.pipelines` API.
-- Run identity: the deploying user by default. It needs `USE CATALOG`, `USE SCHEMA` and `SELECT` on Bronze, and `USE SCHEMA`/`CREATE TABLE` on the target schema. To let deployment create a missing target schema, grant `CREATE SCHEMA` on the catalog; otherwise create `silver_dev` and `silver` first and grant the appropriate privileges. Managed catalog storage must already be configured.
+- Run identity: the deploying user by default. It needs `USE CATALOG`, `USE SCHEMA` and `SELECT` on Bronze, and `USE SCHEMA`/`CREATE TABLE` on the target schema. To let deployment create a missing target schema, grant `CREATE SCHEMA` on the catalog; otherwise create the selected schema (`silver_dev`, `silver_day_test`, or `silver`) first and grant the appropriate privileges. Managed catalog storage must already be configured.
 - No S3 keys, raw-file access, external Python packages, manual checkpoints, SQL warehouse ID, or cluster ID are required by this Silver bundle. It reads the existing Bronze table through Unity Catalog.
 - Stop Bronze ingestion while this Job runs. Preflight records a Delta version; validation fails if Bronze advances during the run. This prevents a misleading comparison between different snapshots. Appends between completed Job runs are supported.
 - The nine outputs are managed by one pipeline. Deploy only one production instance against `github_lakehouse.silver`; other users/deployments must use distinct target schemas.
@@ -78,17 +82,19 @@ databricks bundle run silver_job -t dev -p gharchive
 
 `dev` reads only `2024-02-01-0.json.gz`, requires one source file, and publishes to `github_lakehouse.silver_dev`. It is a separate pipeline with separate checkpoints from production. The pipeline task creates all nine tables automatically, even when a particular event has zero valid rows in a small test scope.
 
-For a one-day pilot, deploy a **separate** target schema/pipeline using a separate bundle target copied from `dev` (for example `day_test`), with `source_file_name: ""`, `source_start_date: "2024-02-01"`, `source_end_date: "2024-02-01"`, `expected_source_files: "24"`, and `silver_schema: silver_day_test`. Do not expand the source filter on an already-checkpointed pipeline: it would not replay rows previously filtered out. A coordinated full refresh of all pipeline tables is the alternative for an intentional scope change.
+The same code also includes a `day_test` target. It uses all 24 hours of 2024-02-01 and publishes to `github_lakehouse.silver_day_test`. Both `dev` and `day_test` enable the additional pilot audit. Select the scope through deployment configuration; there is no copied one-day pipeline.
 
-Then deploy/run production:
+For the one-day pilot:
 
 ```powershell
-databricks bundle validate -t prod -p gharchive
-databricks bundle deploy -t prod -p gharchive
-databricks bundle run silver_job -t prod -p gharchive
+databricks bundle validate -t day_test -p gharchive
+databricks bundle deploy -t day_test -p gharchive
+databricks bundle run silver_job -t day_test -p gharchive
 ```
 
-Production uses the complete existing Bronze snapshot on the first run and all later appends on subsequent triggered updates. There is no date-skip logic and ordinary runs set `full_refresh: false`. A rerun with no appended Bronze rows should leave all target and quarantine counts unchanged.
+Each target has its own deployment state, pipeline ID, checkpoints, and schema. Keep the existing `dev` scope unchanged when redeploying it. Expanding the source filter on its already-checkpointed pipeline does not reliably replay older filtered rows. Use `day_test` for the broader initial read.
+
+After the first successful pilot run, save its output, then run the same Job again with Bronze unchanged and `full_refresh: false`. Follow [PILOT_RUNBOOK.md](PILOT_RUNBOOK.md) to compare the reports and collect performance evidence. Stop after this pilot. The existing `prod` target remains available for a separately authorized full-week run; it is not deployed or run by selecting `day_test`.
 
 The bundle is just a deployment definition; no GitHub Actions/CI platform is needed. You can also deploy the nested `databricks.yml` using the workspace bundle editor. The bundle commands deploy only this Silver folder.
 
@@ -107,6 +113,7 @@ These are **deployment variables**, shared by the pipeline configuration and Job
 | `max_bytes_per_trigger` | `1g` | Soft source micro-batch byte limit; tune after observing the pilot. |
 | `expected_source_files` | `0` | 0 reports coverage; a positive value enforces it. Use 168 for an initial full-week gate. |
 | `max_quarantine_rows` | `-1` | -1 reports all quarantine; nonnegative value fails validation above that count. Use 2 only after confirming the historical baseline. |
+| `pilot_audit` | `false` | Extra evidence queries; enabled in `dev` and `day_test`. Measures semantic anomalies without changing the cleaning contract. |
 
 Automatically wired settings:
 
@@ -117,7 +124,7 @@ Automatically wired settings:
 - Job concurrency: 1, queue enabled, timeout: 14,400 seconds. Preflight and validation have zero retries; the pipeline task has one retry after 60 seconds. Dependencies require upstream success.
 - Schedule: absent (run on demand after Bronze ingestion). Add scheduling only when Bronze ingestion has a known schedule. No notification recipient is invented.
 
-For manual UI setup, create a pipeline with this folder as its root, add **only `07_silver_pipeline`** as a library, set the catalog/schema and the six configuration keys above, and choose serverless/triggered/Advanced/CURRENT. Create the three Job tasks with the notebook paths and `base_parameters` shown in `databricks.yml`, referencing that pipeline's ID. A pipeline task manages its own compute; the two notebook tasks use serverless Jobs. Pull the complete folder, including both helper modules.
+For manual UI setup, create a pipeline with this folder as its root, add **only `07_silver_pipeline`** as a library, set the catalog/schema and the six configuration keys above, and choose serverless/triggered/Advanced/CURRENT. Create the three Job tasks with the notebook paths and `base_parameters` shown in `databricks.yml`, referencing that pipeline's ID. A pipeline task manages its own compute; the two notebook tasks use serverless Jobs. Pull the complete folder, including all helper modules. Notebook 09 is an optional manual evidence collector, not a pipeline library or fourth Job task.
 
 ## Correctness and performance
 

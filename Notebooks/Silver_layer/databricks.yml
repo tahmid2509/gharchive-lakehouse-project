@@ -23,6 +23,9 @@ variables:
   max_quarantine_rows:
     description: "-1 reports all contract failures; 2 is an optional full-week baseline gate."
     default: "-1"
+  pilot_audit:
+    description: "Enable detailed pilot evidence for the selected scope; does not change cleaning."
+    default: "false"
 
 workspace:
   root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
@@ -77,6 +80,7 @@ resources:
               source_end_date: ${var.source_end_date}
               source_file_name: ${var.source_file_name}
               expected_source_files: ${var.expected_source_files}
+              pilot_audit: ${var.pilot_audit}
         - task_key: silver_pipeline
           depends_on:
             - task_key: preflight
@@ -101,6 +105,7 @@ resources:
               source_file_name: ${var.source_file_name}
               bronze_version: "{{tasks.preflight.values.bronze_version}}"
               max_quarantine_rows: ${var.max_quarantine_rows}
+              pilot_audit: ${var.pilot_audit}
 
 targets:
   dev:
@@ -109,6 +114,15 @@ targets:
       silver_schema: silver_dev
       source_file_name: 2024-02-01-0.json.gz
       expected_source_files: "1"
+      pilot_audit: "true"
+  day_test:
+    variables:
+      silver_schema: silver_day_test
+      source_start_date: "2024-02-01"
+      source_end_date: "2024-02-01"
+      source_file_name: ""
+      expected_source_files: "24"
+      pilot_audit: "true"
   prod:
     variables:
       silver_schema: silver
