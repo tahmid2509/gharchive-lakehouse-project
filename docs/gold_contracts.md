@@ -10,7 +10,7 @@ This file is the single written source of truth for the six Gold tables of the G
 |---|---|
 | Data window | 2024-02-01 00:00 UTC up to, but not including, 2024-02-08 00:00 UTC (168 hourly GH Archive files) |
 | Based on | Completion Manual (Part IV and V), Silver Schema Reference, revised NULL and Quarantine Policy, the Silver notebooks on `main`, and the run of `00_gold_data_profiling` on 14 November 2026 |
-| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and the first Gold table, G2 (`02`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 and its test notebook have not run in Databricks yet, so no Gold table has been built yet |
+| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and the first Gold table, G2 (`02`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G2 is the only Gold table built so far |
 
 ## Contents
 
@@ -489,6 +489,32 @@ After a run for all dates, these totals can be compared directly with the table 
 | Sum of `issue_close_duration_eligible_rows` | 217,866, which is 32 lower than the closed actions |
 | Sum of `issues_with_usable_key_rows` | 548,956 |
 
+### Results on the real week
+
+The first two runs of G2 on the real data, on 15 November 2026 (UTC):
+
+| Run | Result |
+|---|---|
+| `source_date = 2024-02-03` | `SUCCEEDED`, no gate failed. 1 affected day, 58,419 Silver rows read, 19,824 rows published with `REPLACE WHERE` |
+| All dates | `SUCCEEDED`, no gate failed. 7 affected days, 548,956 Silver rows read, 194,627 rows published with `INSERT OVERWRITE` |
+
+- Every expected value of the table above was met exactly.
+- The rows per day are those of section 18.
+- The totals of 3 February were the same after both runs.
+- No row was without an event date, and no action was other than `opened`, `closed` and `reopened`.
+- Each publish was one Delta commit: the Gold table was at version 1 after the first run and at version 2 after the second.
+
+| Day | Rows | Issue events | Opened | Closed | Reopened | Duration eligible rows |
+|---|---|---|---|---|---|---|
+| 2024-02-01 | 31,387 | 90,166 | 53,454 | 35,274 | 1,438 | 35,272 |
+| 2024-02-02 | 29,315 | 82,090 | 48,488 | 32,349 | 1,253 | 32,340 |
+| 2024-02-03 | 19,824 | 58,419 | 35,258 | 22,250 | 911 | 22,250 |
+| 2024-02-04 | 21,107 | 58,167 | 35,069 | 22,383 | 715 | 22,382 |
+| 2024-02-05 | 30,383 | 83,467 | 47,949 | 34,169 | 1,349 | 34,160 |
+| 2024-02-06 | 31,706 | 88,826 | 51,068 | 36,201 | 1,557 | 36,194 |
+| 2024-02-07 | 30,905 | 87,821 | 51,190 | 35,272 | 1,359 | 35,268 |
+| **Week** | **194,627** | **548,956** | **322,476** | **217,898** | **8,582** | **217,866** |
+
 ### How to read it
 
 - The table shows the flow of this week. It does not show how many issues are open in total.
@@ -954,3 +980,4 @@ The medians in this table are estimates from the profiling run. The Gold tables 
 | 2026-11-15 | First run of the manifest in Databricks. Section 8: the results of the run, the thin hour minute by minute (most likely thin at the source, the hour stays complete), and why the S3 comparison is not used: the S3 connection was removed on purpose after the week was loaded, so decision 11 now rests on Bronze alone. Section 13: note on windows that cover the thin hour. Section 16: a test notebook ends with one result for the whole test. |
 | 2026-11-15 | Status: the test notebook of the manifest passed in Databricks (12 of 12 sections, 145 checks). No rule changed. |
 | 2026-11-15 | Step 5, G2. Section 5: `event_id` is compared as text when two events share the latest second, and a repository-day without any name has the label NULL. Section 6: rows without an event date are counted under `missing_event_date`, the two publish statements, and `NO_INPUT` when there is no affected day. Section 10: two more quality gates (no count is NULL, durations fit the eligible rows), the names of the gates, and the content of the audit row. Section 16: three more kinds of test (other days untouched, a day that is gone, a bad `run_id`). |
+| 2026-11-15 | First runs of G2 in Databricks. Status and section 10: the test notebook passed (13 of 13 sections, 135 checks), and the runs for one date and for all dates met every expected value. Section 10 has the results per day. No rule changed. |
