@@ -10,7 +10,7 @@ This file is the single written source of truth for the six Gold tables of the G
 |---|---|
 | Data window | 2024-02-01 00:00 UTC up to, but not including, 2024-02-08 00:00 UTC (168 hourly GH Archive files) |
 | Based on | Completion Manual (Part IV and V), Silver Schema Reference, revised NULL and Quarantine Policy, the Silver notebooks on `main`, and the run of `00_gold_data_profiling` on 14 November 2026 |
-| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`) and the source-hour manifest (`07`). No Gold table has been built yet |
+| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`) and the source-hour manifest (`07`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. No Gold table has been built yet |
 
 ## Contents
 
@@ -283,7 +283,39 @@ The keys of `quality_metrics` for the manifest: `expected_hours`, `complete_hour
 
 Measured on 14 November 2026: all 168 expected files are in Bronze, each loaded once, 38,555,222 rows in total.
 
-**Open point.** The file `2024-02-05-19.json.gz` has 139,013 rows. The hours before and after it have 268,637 and 242,290, so it has 54% of their average and is the only thin hour of the week. The manifest notebook compares this file with its raw line count and counts its events per minute. If a part of the hour is missing at the source, it cannot be repaired, and the G5 documentation will say that windows touching this hour are slightly low.
+The first run of the manifest on the real data, on 15 November 2026:
+
+| Value | Result |
+|---|---|
+| Status | `SUCCEEDED`, no gate failed |
+| Hours in the manifest | 168, on 7 days |
+| Complete hours | 168 |
+| Bronze rows | 38,555,222 |
+| Files in Bronze that no hour expects | 0 |
+| Bronze rows without a readable event type | 0 of 38,555,222 |
+| Thin hours | 1 |
+| Hours compared with S3 | 0. See the open point below |
+
+**The thin hour.** The file `2024-02-05-19.json.gz` has 139,013 rows. The hours before and after it have 268,637 and 242,290, so it has 54% of their average. It is the only thin hour of the week. Its events per minute in Bronze:
+
+| Minutes (UTC) | Events per minute |
+|---|---|
+| 19:00 to 19:23 | About 4,350, the usual rate (3,822 to 4,643) |
+| 19:24 to 19:30 | Falling, about 2,900 on average |
+| 19:31 to 19:57 | About 520 on average (92 to 1,318) |
+| 19:58 and 19:59 | None |
+
+The events get fewer step by step and then stop. A file that was cut off during loading would look different: the usual rate up to one point and nothing after it. So the hour was most likely already thin when GH Archive recorded it. That is a conclusion from the pattern. The proof would be the line count of the raw file, which could not be read (see the open point below).
+
+At the rate of the first 24 minutes a full hour would have about 261,000 events, so about 122,000 are missing. That is an estimate. It is about 2% of the 5,589,778 Bronze rows of 5 February.
+
+What follows from it:
+
+- The hour stays complete in the manifest. Its file is loaded. Events that GH Archive does not have cannot be loaded from anywhere.
+- The counts of every daily Gold table (G1, G2, G3, G4, G6) are slightly low for 5 February, because most events from about 19:24 to 20:00 UTC are missing.
+- In G5 a window that covers this hour is slightly low. See section 13, "How to read it".
+
+**Open point: the S3 comparison.** The run of 15 November asked for it with `check_s3 = yes`. The raw files could not be read, because S3 answered `Forbidden` for `s3://tahmid-gharchive-lakehouse/raw/github`. The notebook printed its warning and went on, as designed, so every hour has the evidence level `BRONZE_ONLY`. The same folder could be read in September, when Bronze was loaded. Until the raw files can be read again, the manifest rests on Bronze alone: all 168 files are there, each loaded once, and the Bronze ingestion checked 24 of 24 files on each day. What is still unproven is that every Bronze file has exactly as many rows as its raw file has lines.
 
 ## 9. G1 `repository_delivery_metrics`
 
@@ -669,6 +701,7 @@ Notes on the rules:
 - Windows of releases that are close together overlap. Do not add rows up across releases.
 - The day of the week and the time of day also change activity.
 - Releases from the first and last 24 hours of the week are not in the table.
+- One source hour is thin: on 5 February 2024 from about 19:24 to 20:00 UTC, Bronze holds far fewer events than usual (section 8). A release published in the 24 hours before these minutes has them in its after window, so its after count is slightly low and the change looks more negative than it was. A release published in the 24 hours after them, until 6 February 20:00 UTC, has them in its before window, so its before count is slightly low and the change looks more positive than it was. Over all event types and repositories, about 2% of the events of such a 24-hour window are missing. That is an estimate, and for one repository it can be more or less.
 - A release often comes with its own pushes, which count as activity.
 - Many releases are published by automation. 7,416 of the 62,125 repositories with releases have no activity event in the whole week, so many rows show 0 before and 0 after, an empty percentage and `baseline_zero_flag` true. That is a real result.
 
@@ -800,7 +833,9 @@ Each Gold notebook has a test notebook in `Notebooks/Gold_layer/tests/`.
 | Failed check | Bad toy data makes a gate fail: Gold stays unchanged and the status is `FAILED`. |
 | Bad parameter | An invalid `source_date` or `test_schema` stops the notebook before any write. |
 
-A test notebook runs the real notebook with `%run`. A cell that is expected to fail says so in its heading.
+A test notebook runs the real notebook with `%run`. A cell that is expected to fail says so in the text before it. "Run all" stops at such a cell, and the test goes on with "Run all below" from the cell after it. The checks count runs, not audit rows, so it does no harm if such a cell runs twice.
+
+Every check section writes its number of failed checks into one dictionary. The cell "Result of the whole test" near the end reads it and prints `TEST PASSED` only when every section ran and every check passed. A section that failed or was left out is named.
 
 A result counts as verified only after the notebook has run in the Databricks workspace.
 
@@ -891,3 +926,4 @@ The medians in this table are estimates from the profiling run. The Gold tables 
 |---|---|
 | 2026-11-14 | First version. The 13 decisions were approved and the profiling results were worked in. Compared with the plan: G5 checks the draft rule before the published-time rule, rule 6 picks the earliest event among those that passed the earlier rules, and the reason code `DUPLICATE_RELEASE_EVENT` is now `REPEATED_RELEASE_EVENT`. Code style: the calculations are written in SQL and in a style a junior data engineer can read. |
 | 2026-11-15 | Step 4, the foundation. Section 8: the S3 comparison is requested with `check_s3 = yes` and its evidence is kept by later runs, `evidence_level` is decided per hour, and the manifest has its own quality gates, the thin-hour check and the keys of `quality_metrics`. Section 4: name of a staging copy in a test schema. Section 6: allowed characters of `run_id`. |
+| 2026-11-15 | First run of the manifest in Databricks. Section 8: the results of the run, the thin hour minute by minute (most likely thin at the source, the hour stays complete), and a new open point, because the raw files in S3 could not be read. Section 13: note on windows that cover the thin hour. Section 16: a test notebook ends with one result for the whole test. |
