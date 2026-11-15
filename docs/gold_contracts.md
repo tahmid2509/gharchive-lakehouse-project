@@ -10,7 +10,7 @@ This file is the single written source of truth for the six Gold tables of the G
 |---|---|
 | Data window | 2024-02-01 00:00 UTC up to, but not including, 2024-02-08 00:00 UTC (168 hourly GH Archive files) |
 | Based on | Completion Manual (Part IV and V), Silver Schema Reference, revised NULL and Quarantine Policy, the Silver notebooks on `main`, and the run of `00_gold_data_profiling` on 14 November 2026 |
-| Status | Rules and decisions approved on 14 November 2026. Nothing in this file has been built yet |
+| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`) and the source-hour manifest (`07`). No Gold table has been built yet |
 
 ## Contents
 
@@ -97,7 +97,7 @@ The Completion Manual marks its Gold grains, columns and formulas as proposals. 
 | What | Name |
 |---|---|
 | Gold tables | `github_lakehouse.gold.<table>`. Only the six tables of this file live in this schema. |
-| Staging copies | `github_lakehouse.gold_staging.<table>`. Overwritten on every run. Not meant for reading. |
+| Staging copies | `github_lakehouse.gold_staging.<table>`. Overwritten on every run. Not meant for reading. In a test schema the staging copy is called `<table>_staging`. |
 | Gold run audit | `github_lakehouse.audit.gold_pipeline_runs` |
 | Source-hour manifest | `github_lakehouse.audit.source_hour_manifest` |
 | Notebooks | `Notebooks/Gold_layer/` |
@@ -170,7 +170,9 @@ Gold notebooks use the same three widgets as Silver.
 |---|---|
 | `source_date` | A date such as `2024-02-03` rebuilds the Gold days touched by that source date. Blank rebuilds all days. Any other text stops the notebook before it writes. |
 | `test_schema` | Blank means production. A name such as `test_gold_g2` makes the notebook read its Silver tables from that schema and write its Gold, staging and audit tables there. G5 also reads its manifest there. The name must start with `test_` and may contain only lower-case letters, digits and underscores. Any other text stops the notebook before it writes. |
-| `run_id` | The Job run ID, or a generated `manual-...` value when the notebook is run by hand. |
+| `run_id` | The Job run ID, or a generated `manual-...` value when the notebook is run by hand. It may contain only letters, digits, `-` and `_`. |
+
+The manifest notebook has one more widget, `check_s3`. See section 8.
 
 ### A run of a daily table (G1, G2, G3, G4, G6)
 
@@ -204,7 +206,7 @@ A run with a blank date replaces the whole table. It is also the way to remove a
 
 ## 7. The Gold audit table
 
-`github_lakehouse.audit.gold_pipeline_runs` gets exactly one row per run of a Gold notebook.
+`github_lakehouse.audit.gold_pipeline_runs` gets exactly one row per run of a Gold notebook. The manifest notebook writes its row here too, with the manifest as `gold_table`.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -239,12 +241,12 @@ GH Archive delivers one file per hour. A week of timestamps does not prove that 
 | `source_date` | `DATE` | The UTC date of the hour |
 | `expected_file_name` | `STRING` | For example `2024-02-01-0.json.gz` |
 | `bronze_ingested` | `BOOLEAN` | The file has rows in Bronze |
-| `bronze_row_count` | `BIGINT` | Rows of that file in Bronze |
+| `bronze_row_count` | `BIGINT` | Rows of that file in Bronze. 0 when the file is not in Bronze |
 | `bronze_first_ingested_at` | `TIMESTAMP` | First ingestion time of that file |
-| `s3_file_found` | `BOOLEAN` | Filled when the S3 comparison runs, otherwise NULL |
-| `s3_line_count` | `BIGINT` | Lines of the raw file. Filled when the S3 comparison runs |
-| `counts_match` | `BOOLEAN` | Bronze rows equal raw lines. Filled when the S3 comparison runs |
-| `evidence_level` | `STRING` | `BRONZE_AND_S3` or `BRONZE_ONLY` |
+| `s3_file_found` | `BOOLEAN` | The raw file was found by the last S3 comparison. NULL when the hour was never compared |
+| `s3_line_count` | `BIGINT` | Lines of the raw file, from the last S3 comparison |
+| `counts_match` | `BOOLEAN` | Bronze rows equal raw lines. Calculated again on every run. NULL when there is no raw line count to compare with |
+| `evidence_level` | `STRING` | `BRONZE_AND_S3` when the raw file was found and counted, otherwise `BRONZE_ONLY` |
 | `is_complete` | `BOOLEAN` | The one column G5 reads |
 | `checked_at` | `TIMESTAMP` | When the row was written |
 | `run_id` | `STRING` | The run that wrote it |
@@ -254,13 +256,34 @@ Rules:
 - The expected hours are 24 for every date from the first to the last source date in Bronze.
 - An hour is complete when its file is in Bronze with at least one row and, where compared, the counts match.
 - An hour with zero rows is not complete. A real GH Archive hour has many thousands of events.
-- If S3 cannot be reached, the manifest uses the Bronze evidence only and says so in `evidence_level`.
+- The manifest is replaced completely on every run, whatever `source_date` says. It goes through the same steps as a Gold table: stage, check, publish, audit.
 - If hours are missing, there are two honest choices: load them, or let G5 leave out the affected releases and report how many. A partial window is never published as a full one.
-- The same notebook repeats the global routing check: Bronze rows whose JSON or event type cannot be read. The Silver profiling found 0.
+
+The S3 comparison:
+
+- It runs only on request, with the widget `check_s3 = yes` of the manifest notebook. It counts the lines of every raw file and stores them in `gold_staging.source_hour_s3_line_counts`.
+- A later run without `check_s3` keeps the S3 evidence that is in the manifest and compares it with the Bronze rows again. So the comparison has to run only once, and a later change in Bronze still shows up as a mismatch.
+- If S3 cannot be reached, the notebook prints a warning, keeps the evidence it already has and does not fail. `evidence_level` says for every hour which evidence it rests on.
+- `check_s3 = yes` is not allowed together with a test schema. A test never reads S3.
+
+Quality gates on every run:
+
+- The number of rows is 24 times the number of expected days.
+- No hour and no file name appears twice, and none is missing.
+- `bronze_ingested`, `bronze_row_count`, `evidence_level` and `is_complete` are never NULL.
+- No hour is marked complete with 0 rows in Bronze or with different counts.
+- Hours that are not complete do not fail a gate. They are a result.
+
+Two more checks in the same notebook. Neither stops the run. Both are stored in `quality_metrics` of the audit row:
+
+- **The global routing check:** Bronze rows whose JSON or event type cannot be read. No Silver notebook would pick them up. The Silver profiling found 0. With a `source_date` only that date is read.
+- **Thin hours:** hours with less than 70% of the average rows of the hour before and the hour after. A thin hour stays complete. The notebook lists it and shows its events per minute.
+
+The keys of `quality_metrics` for the manifest: `expected_hours`, `complete_hours`, `incomplete_hours`, `hours_in_bronze`, `hours_compared_with_s3`, `hours_with_count_mismatch`, `unexpected_bronze_files`, `thin_hours`, `bronze_rows_checked_for_type`, `bronze_rows_without_readable_type`, `s3_check_requested`, `s3_check_done`.
 
 Measured on 14 November 2026: all 168 expected files are in Bronze, each loaded once, 38,555,222 rows in total.
 
-**Open point.** The file `2024-02-05-19.json.gz` has 139,013 rows. The hours before and after it have 268,637 and 242,290. The manifest notebook compares this file with its raw line count and counts its events per minute. If a part of the hour is missing at the source, it cannot be repaired, and the G5 documentation will say that windows touching this hour are slightly low.
+**Open point.** The file `2024-02-05-19.json.gz` has 139,013 rows. The hours before and after it have 268,637 and 242,290, so it has 54% of their average and is the only thin hour of the week. The manifest notebook compares this file with its raw line count and counts its events per minute. If a part of the hour is missing at the source, it cannot be repaired, and the G5 documentation will say that windows touching this hour are slightly low.
 
 ## 9. G1 `repository_delivery_metrics`
 
@@ -777,6 +800,8 @@ Each Gold notebook has a test notebook in `Notebooks/Gold_layer/tests/`.
 | Failed check | Bad toy data makes a gate fail: Gold stays unchanged and the status is `FAILED`. |
 | Bad parameter | An invalid `source_date` or `test_schema` stops the notebook before any write. |
 
+A test notebook runs the real notebook with `%run`. A cell that is expected to fail says so in its heading.
+
 A result counts as verified only after the notebook has run in the Databricks workspace.
 
 ## 17. Code style
@@ -865,3 +890,4 @@ The medians in this table are estimates from the profiling run. The Gold tables 
 | Date | Change |
 |---|---|
 | 2026-11-14 | First version. The 13 decisions were approved and the profiling results were worked in. Compared with the plan: G5 checks the draft rule before the published-time rule, rule 6 picks the earliest event among those that passed the earlier rules, and the reason code `DUPLICATE_RELEASE_EVENT` is now `REPEATED_RELEASE_EVENT`. Code style: the calculations are written in SQL and in a style a junior data engineer can read. |
+| 2026-11-15 | Step 4, the foundation. Section 8: the S3 comparison is requested with `check_s3 = yes` and its evidence is kept by later runs, `evidence_level` is decided per hour, and the manifest has its own quality gates, the thin-hour check and the keys of `quality_metrics`. Section 4: name of a staging copy in a test schema. Section 6: allowed characters of `run_id`. |
