@@ -88,7 +88,7 @@ The Completion Manual marks its Gold grains, columns and formulas as proposals. 
 | 8 | Review states in G4 | Five columns: approved, changes requested, commented, dismissed, other. |
 | 9 | Prereleases in G5 | Included, with the column `is_prerelease`. An unknown flag is never treated as false. |
 | 10 | Several events for one release in G5 | One anchor per `repo_id` and `release_id`: the earliest event. A release without an ID is left out and counted. |
-| 11 | Proof of complete hours for G5 | A manifest built from Bronze, plus a one-time comparison with the line counts of the raw files in S3. |
+| 11 | Proof of complete hours for G5 | A manifest built from Bronze. The planned one-time comparison with the line counts of the raw files in S3 is not made, because the S3 connection was removed on purpose after the week was loaded. See section 8. |
 | 12 | G6 scope | Core columns first. Optional columns in a second small step. |
 | 13 | Labels and rounding | `repo_name` is included as a label: the latest name seen that day. Percentages run from 0 to 100 with 2 decimals. Hours have 2 decimals. |
 
@@ -259,7 +259,7 @@ Rules:
 - The manifest is replaced completely on every run, whatever `source_date` says. It goes through the same steps as a Gold table: stage, check, publish, audit.
 - If hours are missing, there are two honest choices: load them, or let G5 leave out the affected releases and report how many. A partial window is never published as a full one.
 
-The S3 comparison:
+The S3 comparison is an option of the notebook. **It is not used in this project** (see "Why the S3 comparison is not used" below). How it works:
 
 - It runs only on request, with the widget `check_s3 = yes` of the manifest notebook. It counts the lines of every raw file and stores them in `gold_staging.source_hour_s3_line_counts`.
 - A later run without `check_s3` keeps the S3 evidence that is in the manifest and compares it with the Bronze rows again. So the comparison has to run only once, and a later change in Bronze still shows up as a mismatch.
@@ -294,7 +294,7 @@ The first run of the manifest on the real data, on 15 November 2026:
 | Files in Bronze that no hour expects | 0 |
 | Bronze rows without a readable event type | 0 of 38,555,222 |
 | Thin hours | 1 |
-| Hours compared with S3 | 0. See the open point below |
+| Hours compared with S3 | 0. The S3 connection was removed on purpose, see below |
 
 **The thin hour.** The file `2024-02-05-19.json.gz` has 139,013 rows. The hours before and after it have 268,637 and 242,290, so it has 54% of their average. It is the only thin hour of the week. Its events per minute in Bronze:
 
@@ -305,7 +305,7 @@ The first run of the manifest on the real data, on 15 November 2026:
 | 19:31 to 19:57 | About 520 on average (92 to 1,318) |
 | 19:58 and 19:59 | None |
 
-The events get fewer step by step and then stop. A file that was cut off during loading would look different: the usual rate up to one point and nothing after it. So the hour was most likely already thin when GH Archive recorded it. That is a conclusion from the pattern. The proof would be the line count of the raw file, which could not be read (see the open point below).
+The events get fewer step by step and then stop. A file that was cut off during loading would look different: the usual rate up to one point and nothing after it. So the hour was most likely already thin when GH Archive recorded it. That is a conclusion from the pattern. The proof would be the line count of the raw file, which can no longer be read from Databricks (see below).
 
 At the rate of the first 24 minutes a full hour would have about 261,000 events, so about 122,000 are missing. That is an estimate. It is about 2% of the 5,589,778 Bronze rows of 5 February.
 
@@ -315,7 +315,14 @@ What follows from it:
 - The counts of every daily Gold table (G1, G2, G3, G4, G6) are slightly low for 5 February, because most events from about 19:24 to 20:00 UTC are missing.
 - In G5 a window that covers this hour is slightly low. See section 13, "How to read it".
 
-**Open point: the S3 comparison.** The run of 15 November asked for it with `check_s3 = yes`. The raw files could not be read, because S3 answered `Forbidden` for `s3://tahmid-gharchive-lakehouse/raw/github`. The notebook printed its warning and went on, as designed, so every hour has the evidence level `BRONZE_ONLY`. The same folder could be read in September, when Bronze was loaded. Until the raw files can be read again, the manifest rests on Bronze alone: all 168 files are there, each loaded once, and the Bronze ingestion checked 24 of 24 files on each day. What is still unproven is that every Bronze file has exactly as many rows as its raw file has lines.
+**Why the S3 comparison is not used.** After the seven days were loaded into Bronze, the S3 connection was removed from Databricks on purpose. Without it, nothing can read the bucket by accident and add to the bill. So the raw files cannot be read from Databricks any more, and that is intended.
+
+- `check_s3` stays blank in this project, in manual runs and in the Job.
+- Every hour has the evidence level `BRONZE_ONLY`. The columns `s3_file_found`, `s3_line_count` and `counts_match` are NULL.
+- The run of 15 November 2026 was made with `check_s3 = yes`. S3 answered `Forbidden`, the notebook printed its warning and went on, as designed. Its audit row has `s3_check_requested` 1 and `s3_check_done` 0.
+- What the manifest rests on: all 168 files are in Bronze, each loaded once, and the Bronze ingestion checked 24 of 24 files on each day while the connection still existed.
+- What it does not show: that every Bronze file has exactly as many rows as its raw file has lines.
+- The option stays in the notebook for a setup that has the connection, for example if more days are loaded later. The comparison itself has run only locally, on small files. In Databricks only its fallback has run.
 
 ## 9. G1 `repository_delivery_metrics`
 
@@ -926,4 +933,4 @@ The medians in this table are estimates from the profiling run. The Gold tables 
 |---|---|
 | 2026-11-14 | First version. The 13 decisions were approved and the profiling results were worked in. Compared with the plan: G5 checks the draft rule before the published-time rule, rule 6 picks the earliest event among those that passed the earlier rules, and the reason code `DUPLICATE_RELEASE_EVENT` is now `REPEATED_RELEASE_EVENT`. Code style: the calculations are written in SQL and in a style a junior data engineer can read. |
 | 2026-11-15 | Step 4, the foundation. Section 8: the S3 comparison is requested with `check_s3 = yes` and its evidence is kept by later runs, `evidence_level` is decided per hour, and the manifest has its own quality gates, the thin-hour check and the keys of `quality_metrics`. Section 4: name of a staging copy in a test schema. Section 6: allowed characters of `run_id`. |
-| 2026-11-15 | First run of the manifest in Databricks. Section 8: the results of the run, the thin hour minute by minute (most likely thin at the source, the hour stays complete), and a new open point, because the raw files in S3 could not be read. Section 13: note on windows that cover the thin hour. Section 16: a test notebook ends with one result for the whole test. |
+| 2026-11-15 | First run of the manifest in Databricks. Section 8: the results of the run, the thin hour minute by minute (most likely thin at the source, the hour stays complete), and why the S3 comparison is not used: the S3 connection was removed on purpose after the week was loaded, so decision 11 now rests on Bronze alone. Section 13: note on windows that cover the thin hour. Section 16: a test notebook ends with one result for the whole test. |
