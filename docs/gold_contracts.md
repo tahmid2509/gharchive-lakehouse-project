@@ -10,7 +10,7 @@ This file is the single written source of truth for the six Gold tables of the G
 |---|---|
 | Data window | 2024-02-01 00:00 UTC up to, but not including, 2024-02-08 00:00 UTC (168 hourly GH Archive files) |
 | Based on | Completion Manual (Part IV and V), Silver Schema Reference, revised NULL and Quarantine Policy, the Silver notebooks on `main`, and the run of `00_gold_data_profiling` on 14 November 2026 |
-| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and two Gold tables, G2 (`02`) and G1 (`01`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 is written and has not run in Databricks yet. G2 is the only Gold table built so far |
+| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and two Gold tables, G2 (`02`) and G1 (`01`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G1 and G2 are the Gold tables built so far |
 
 ## Contents
 
@@ -440,6 +440,33 @@ Rows and events per day, for a run with one date:
 | 2024-02-06 | 111,296 | 345,716 |
 | 2024-02-07 | 106,572 | 331,968 |
 | **Week** | **700,486** | **2,173,958** |
+
+### Results on the real week
+
+The first two runs of G1 on the real data, on 16 November 2026 (UTC):
+
+| Run | Result |
+|---|---|
+| `source_date = 2024-02-03` | `SUCCEEDED`, no gate failed. 1 affected day, 197,802 Silver rows read, 68,242 rows published with `REPLACE WHERE` |
+| All dates | `SUCCEEDED`, no gate failed. 7 affected days, 2,173,958 Silver rows read, 700,486 rows published with `INSERT OVERWRITE` |
+
+- Every expected value of the table above was met exactly, and so were the rows and the events of every day.
+- The totals of 3 February were the same after both runs.
+- No row was without an event date, and no action was other than `opened`, `closed` and `reopened`.
+- On every day, all closed events have a known merged flag, and all merged closes have usable times.
+- The sum of `pr_size_snapshot_rows` is 1,525,648 pull-request-days. Every snapshot has all four sizes, so the four size eligible counts are 1,525,648 too.
+- Each publish was one Delta commit: the Gold table was at version 1 after the first run and at version 2 after the second.
+
+| Day | Rows | Pull request events | Opened | Closed | Reopened | Merged closes | Close duration eligible rows | Snapshots |
+|---|---|---|---|---|---|---|---|---|
+| 2024-02-01 | 116,405 | 387,295 | 206,871 | 178,201 | 2,223 | 136,271 | 178,201 | 276,726 |
+| 2024-02-02 | 113,664 | 332,523 | 174,936 | 154,455 | 3,132 | 120,720 | 154,412 | 235,368 |
+| 2024-02-03 | 68,242 | 197,802 | 101,363 | 94,010 | 2,429 | 74,475 | 94,010 | 131,676 |
+| 2024-02-04 | 62,025 | 189,714 | 93,486 | 94,198 | 2,030 | 74,776 | 94,197 | 123,335 |
+| 2024-02-05 | 122,282 | 388,940 | 205,940 | 181,136 | 1,864 | 133,185 | 181,085 | 283,667 |
+| 2024-02-06 | 111,296 | 345,716 | 174,583 | 169,107 | 2,026 | 133,697 | 169,061 | 242,843 |
+| 2024-02-07 | 106,572 | 331,968 | 169,627 | 160,621 | 1,720 | 126,731 | 160,614 | 232,033 |
+| **Week** | **700,486** | **2,173,958** | **1,126,806** | **1,031,728** | **15,424** | **799,855** | **1,031,580** | **1,525,648** |
 
 ### How to read it
 
@@ -1015,3 +1042,4 @@ The medians in this table are estimates from the profiling run. The Gold tables 
 | 2026-11-15 | Step 5, G2. Section 5: `event_id` is compared as text when two events share the latest second, and a repository-day without any name has the label NULL. Section 6: rows without an event date are counted under `missing_event_date`, the two publish statements, and `NO_INPUT` when there is no affected day. Section 10: two more quality gates (no count is NULL, durations fit the eligible rows), the names of the gates, and the content of the audit row. Section 16: three more kinds of test (other days untouched, a day that is gone, a bad `run_id`). |
 | 2026-11-15 | First runs of G2 in Databricks. Status and section 10: the test notebook passed (13 of 13 sections, 135 checks), and the runs for one date and for all dates met every expected value. Section 10 has the results per day. No rule changed. |
 | 2026-11-16 | Step 6, G1. Section 9: a pull request number counts only inside its repository, a size of 0 is a known value, a repository-day without any pull request key still has a row, and an unknown action is in none of the four action columns. Three more quality gates (no count is NULL, the share lies between 0 and 100, a value exists exactly when its count is above 0), the names of the gates, the content of the audit row, and the expected rows and events per day. |
+| 2026-11-16 | First runs of G1 in Databricks. Status and section 9: the test notebook passed (13 of 13 sections, 153 checks), and the runs for one date and for all dates met every expected value. Section 9 has the results per day and the measured number of snapshots. No rule changed. |
