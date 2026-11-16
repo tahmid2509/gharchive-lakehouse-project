@@ -10,7 +10,7 @@ This file is the single written source of truth for the six Gold tables of the G
 |---|---|
 | Data window | 2024-02-01 00:00 UTC up to, but not including, 2024-02-08 00:00 UTC (168 hourly GH Archive files) |
 | Based on | Completion Manual (Part IV and V), Silver Schema Reference, revised NULL and Quarantine Policy, the Silver notebooks on `main`, and the run of `00_gold_data_profiling` on 14 November 2026 |
-| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`) and the source-hour manifest (`07`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. No Gold table has been built yet |
+| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and the first Gold table, G2 (`02`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G2 is the only Gold table built so far |
 
 ## Contents
 
@@ -147,7 +147,7 @@ The median columns (`p50_...`) hold the exact median, so the same input always g
 
 ### The `repo_name` label
 
-`repo_name` is the name on the latest event of that repository on that day, among the events the table reads. If two events share the latest second, the one with the larger `event_id` wins. A missing name is skipped. In G5 the label is the name on the anchor event.
+`repo_name` is the name on the latest event of that repository on that day, among the events the table reads. If two events share the latest second, the one with the larger `event_id` wins. `event_id` is text and is compared as text. A missing name is skipped. A repository-day whose events all have no name has the label NULL. In G5 the label is the name on the anchor event.
 
 ### Technical columns
 
@@ -176,12 +176,14 @@ The manifest notebook has one more widget, `check_s3`. See section 8.
 
 ### A run of a daily table (G1, G2, G3, G4, G6)
 
-1. **Find the affected days.** With a `source_date`, these are the event dates found in the Silver rows of that source date, in any Silver table the notebook reads. With a blank date, they are all days.
+1. **Find the affected days.** With a `source_date`, these are the event dates found in the Silver rows of that source date, in any Silver table the notebook reads. With a blank date, they are all days. A row in the scope of the run that has no event date is left out and counted in `rows_excluded` under the key `missing_event_date`.
 2. **Build.** Calculate the Gold rows for those days from all Silver rows of those days, not only from the rows of this source date.
 3. **Stage.** Write the result to the staging copy.
 4. **Check.** Run the quality gates of the table on the staging copy.
-5. **Publish.** Replace exactly those days in the Gold table with the staged rows, as one Delta commit. With a blank date the whole table is replaced.
+5. **Publish.** Replace exactly those days in the Gold table with the staged rows, as one Delta commit. With a `source_date` the statement is `INSERT INTO ... REPLACE WHERE activity_date IN (the affected days)`. With a blank date the whole table is replaced with `INSERT OVERWRITE`.
 6. **Audit.** Write one row to `audit.gold_pipeline_runs`.
+
+When there is no affected day, nothing is published and the status is `NO_INPUT`.
 
 What this guarantees:
 
@@ -458,10 +460,24 @@ Added to the manual's proposal: `repo_name`, `issue_other_action_rows`.
 ### Quality gates on every run
 
 - The key is unique and never NULL.
+- No count column is NULL.
 - Opened + closed + reopened + other = known actions ≤ all events.
 - Duration eligible rows ≤ close actions, and no duration is negative.
+- A row has an average and a median exactly when it has duration eligible rows.
 - Distinct issues ≤ rows with a usable key ≤ all events.
-- The sum of `issue_event_count` equals the Silver row count for the same days.
+- The sum of `issue_event_count` equals the Silver row count for the same days. The Silver rows are counted directly on the Silver table.
+
+The names of the gates, as they appear in `failed_checks`: `KEY_NOT_UNIQUE`, `KEY_IS_NULL`, `COUNT_IS_NULL`, `ACTIONS_DO_NOT_ADD_UP`, `KNOWN_ACTIONS_ABOVE_EVENTS`, `ELIGIBLE_ROWS_ABOVE_CLOSED_ACTIONS`, `NEGATIVE_DURATION`, `DURATION_DOES_NOT_FIT_ELIGIBLE_ROWS`, `ISSUE_COUNTS_OUT_OF_ORDER`, `EVENT_SUM_DIFFERS_FROM_SILVER`.
+
+### The audit row
+
+| Column | Content for G2 |
+|---|---|
+| `source_rows_read` | Key `issue_events`: the Silver rows on the affected days |
+| `rows_excluded` | Key `missing_event_date`: rows in the scope of the run without an event date |
+| `quality_metrics` | `repository_days` and the sums of eight count columns over the rows of this run: `issue_event_count`, `issue_action_known_rows`, `issue_opened_actions`, `issue_closed_actions`, `issue_reopened_actions`, `issue_other_action_rows`, `issue_close_duration_eligible_rows`, `issues_with_usable_key_rows` |
+
+After a run for all dates, these totals can be compared directly with the table below. `distinct_issues_observed` is not summed, because an issue seen on two days would be counted twice.
 
 ### Expected on the real week
 
@@ -472,6 +488,32 @@ Added to the manual's proposal: `repo_name`, `issue_other_action_rows`.
 | Sum of opened, closed, reopened, other | 322,476 · 217,898 · 8,582 · 0 |
 | Sum of `issue_close_duration_eligible_rows` | 217,866, which is 32 lower than the closed actions |
 | Sum of `issues_with_usable_key_rows` | 548,956 |
+
+### Results on the real week
+
+The first two runs of G2 on the real data, on 15 November 2026 (UTC):
+
+| Run | Result |
+|---|---|
+| `source_date = 2024-02-03` | `SUCCEEDED`, no gate failed. 1 affected day, 58,419 Silver rows read, 19,824 rows published with `REPLACE WHERE` |
+| All dates | `SUCCEEDED`, no gate failed. 7 affected days, 548,956 Silver rows read, 194,627 rows published with `INSERT OVERWRITE` |
+
+- Every expected value of the table above was met exactly.
+- The rows per day are those of section 18.
+- The totals of 3 February were the same after both runs.
+- No row was without an event date, and no action was other than `opened`, `closed` and `reopened`.
+- Each publish was one Delta commit: the Gold table was at version 1 after the first run and at version 2 after the second.
+
+| Day | Rows | Issue events | Opened | Closed | Reopened | Duration eligible rows |
+|---|---|---|---|---|---|---|
+| 2024-02-01 | 31,387 | 90,166 | 53,454 | 35,274 | 1,438 | 35,272 |
+| 2024-02-02 | 29,315 | 82,090 | 48,488 | 32,349 | 1,253 | 32,340 |
+| 2024-02-03 | 19,824 | 58,419 | 35,258 | 22,250 | 911 | 22,250 |
+| 2024-02-04 | 21,107 | 58,167 | 35,069 | 22,383 | 715 | 22,382 |
+| 2024-02-05 | 30,383 | 83,467 | 47,949 | 34,169 | 1,349 | 34,160 |
+| 2024-02-06 | 31,706 | 88,826 | 51,068 | 36,201 | 1,557 | 36,194 |
+| 2024-02-07 | 30,905 | 87,821 | 51,190 | 35,272 | 1,359 | 35,268 |
+| **Week** | **194,627** | **548,956** | **322,476** | **217,898** | **8,582** | **217,866** |
 
 ### How to read it
 
@@ -837,8 +879,10 @@ Each Gold notebook has a test notebook in `Notebooks/Gold_layer/tests/`.
 | Late event | Adding one Silver row and rerunning changes the right Gold row. |
 | Removed event | Removing Silver rows and rerunning lowers or removes the Gold row. |
 | No input | A date without Silver rows gives the status `NO_INPUT` and leaves Gold unchanged. |
+| Other days untouched | A run for one source date does not rewrite the rows of the other days. |
+| A day that is gone | After all Silver rows of a day are removed, a run for all dates removes that day from Gold. |
 | Failed check | Bad toy data makes a gate fail: Gold stays unchanged and the status is `FAILED`. |
-| Bad parameter | An invalid `source_date` or `test_schema` stops the notebook before any write. |
+| Bad parameter | An invalid `source_date`, `test_schema` or `run_id` stops the notebook before any write. |
 
 A test notebook runs the real notebook with `%run`. A cell that is expected to fail says so in the text before it. "Run all" stops at such a cell, and the test goes on with "Run all below" from the cell after it. The checks count runs, not audit rows, so it does no harm if such a cell runs twice.
 
@@ -935,3 +979,5 @@ The medians in this table are estimates from the profiling run. The Gold tables 
 | 2026-11-15 | Step 4, the foundation. Section 8: the S3 comparison is requested with `check_s3 = yes` and its evidence is kept by later runs, `evidence_level` is decided per hour, and the manifest has its own quality gates, the thin-hour check and the keys of `quality_metrics`. Section 4: name of a staging copy in a test schema. Section 6: allowed characters of `run_id`. |
 | 2026-11-15 | First run of the manifest in Databricks. Section 8: the results of the run, the thin hour minute by minute (most likely thin at the source, the hour stays complete), and why the S3 comparison is not used: the S3 connection was removed on purpose after the week was loaded, so decision 11 now rests on Bronze alone. Section 13: note on windows that cover the thin hour. Section 16: a test notebook ends with one result for the whole test. |
 | 2026-11-15 | Status: the test notebook of the manifest passed in Databricks (12 of 12 sections, 145 checks). No rule changed. |
+| 2026-11-15 | Step 5, G2. Section 5: `event_id` is compared as text when two events share the latest second, and a repository-day without any name has the label NULL. Section 6: rows without an event date are counted under `missing_event_date`, the two publish statements, and `NO_INPUT` when there is no affected day. Section 10: two more quality gates (no count is NULL, durations fit the eligible rows), the names of the gates, and the content of the audit row. Section 16: three more kinds of test (other days untouched, a day that is gone, a bad `run_id`). |
+| 2026-11-15 | First runs of G2 in Databricks. Status and section 10: the test notebook passed (13 of 13 sections, 135 checks), and the runs for one date and for all dates met every expected value. Section 10 has the results per day. No rule changed. |
