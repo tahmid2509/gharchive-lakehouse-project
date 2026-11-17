@@ -10,7 +10,7 @@ This file is the single written source of truth for the six Gold tables of the G
 |---|---|
 | Data window | 2024-02-01 00:00 UTC up to, but not including, 2024-02-08 00:00 UTC (168 hourly GH Archive files) |
 | Based on | Completion Manual (Part IV and V), Silver Schema Reference, revised NULL and Quarantine Policy, the Silver notebooks on `main`, and the run of `00_gold_data_profiling` on 14 November 2026 |
-| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and four Gold tables, G2 (`02`), G1 (`01`), G4 (`04`) and G6 (`06`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G4 ran on the real data on 17 November 2026 (UTC): 444,720 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 158 checks. G6 (core columns) ran on the real data on 17 November 2026 (UTC): 5,000,573 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 180 checks. The optional columns of G6 are written and have not run in Databricks yet. G1, G2, G4 and G6 are the Gold tables built so far |
+| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and four Gold tables, G2 (`02`), G1 (`01`), G4 (`04`) and G6 (`06`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G4 ran on the real data on 17 November 2026 (UTC): 444,720 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 158 checks. G6 (core columns) ran on the real data on 17 November 2026 (UTC): 5,000,573 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 180 checks. The optional columns of G6 ran on the real data on 17 November 2026 (UTC), every expected value met. The extended test notebook passed on the same day: 13 of 13 sections, 208 checks. G1, G2, G4 and G6 are the Gold tables built so far |
 
 ## Contents
 
@@ -1048,11 +1048,11 @@ After a run for all dates, these totals can be compared directly with the tables
 | Sum of `unique_known_actors` | Not measured before the first run. It cannot be above 33,623,791. The first run measured 6,881,398 |
 | Sum of `push_commit_eligible_events` | 26,536,356: all pushes except the 611 without usable counts |
 | Sum of `push_distinct_commit_eligible_events` | 26,536,356, the same pushes |
-| Sums of `known_push_commits` and `known_push_distinct_commits` | Not measured before the first run |
+| Sums of `known_push_commits` and `known_push_distinct_commits` | Not measured before the first run. The first run measured 81,686,969 and 48,608,061 |
 | Sum of `issue_conversation_comment_events` | 519,146, as in G4 |
 | Sum of `pr_conversation_comment_events` | 838,176, as in G4 |
 | Sum of `unclassified_conversation_comment_events` | 2, as in G4 |
-| Sum of `active_utc_hours` | Not measured before the first run. At least 5,000,573 (one per row) and not above 33,623,791 (one per event) |
+| Sum of `active_utc_hours` | Not measured before the first run. At least 5,000,573 (one per row) and not above 33,623,791 (one per event). The first run measured 10,144,599 |
 | Rows with NULL in an optional column | 0 after a run for all dates |
 
 Each type sum is the row count of its Silver table in section 1.
@@ -1128,6 +1128,36 @@ The kinds not shown in the tables above, and the people:
 | 2024-02-06 | 777,905 | 4,999,343 | 3,843,012 | 202,413 | 50,999 | 24,280 | 1,085,320 |
 | 2024-02-07 | 760,343 | 5,071,463 | 3,952,651 | 198,289 | 49,841 | 24,121 | 1,054,217 |
 | **Week** | **5,000,573** | **33,623,791** | **26,536,967** | **1,380,559** | **326,417** | **159,416** | **6,881,398** |
+
+The two runs of the second version, with the optional columns, on 17 November 2026 (UTC). Before them, the Gold table held the rows of the first version:
+
+| Run | Result |
+|---|---|
+| `source_date = 2024-02-03` | Step 2.1 added the eight optional columns: 35 columns. `SUCCEEDED`, no gate failed. 1 affected day, 4,447,005 Silver rows read, 579,908 rows published with `REPLACE WHERE`. After the run, the rows of 3 February had the optional values, and the rows of the six other days still had NULL in them |
+| All dates | Step 2.1 found the columns and changed nothing. `SUCCEEDED`, no gate failed. 7 affected days, 33,623,791 Silver rows read, 5,000,573 rows published with `INSERT OVERWRITE`. No row has NULL in an optional column |
+
+- Every expected value was met exactly: the 611 pushes without usable counts, the comment split of every day (equal to G4), and the core columns of every day (equal to the first version).
+- The values of 3 February were the same after both runs.
+- The test notebook ran before the two runs. The production audit, Gold and staging tables had the same Delta version before and after it.
+- The Gold table was at version 4 after the first run (the `ADD COLUMNS` is version 3) and at version 6 after the second. That is one version more than the notebook writes; the cause was not checked. A test must never expect an exact Delta version.
+
+The optional values per day:
+
+| Day | Active hours | Pushes with a known commit count | Pushes without | Their commits | Commits per push |
+|---|---|---|---|---|---|
+| 2024-02-01 | 1,577,346 | 3,723,216 | 111 | 11,258,748 | 3.02 |
+| 2024-02-02 | 1,485,271 | 3,858,476 | 94 | 10,924,538 | 2.83 |
+| 2024-02-03 | 1,201,741 | 3,793,451 | 82 | 18,770,772 | 4.95 |
+| 2024-02-04 | 1,247,168 | 3,761,401 | 67 | 8,227,864 | 2.19 |
+| 2024-02-05 | 1,522,952 | 3,604,318 | 88 | 10,357,934 | 2.87 |
+| 2024-02-06 | 1,567,736 | 3,842,920 | 92 | 10,985,000 | 2.86 |
+| 2024-02-07 | 1,542,385 | 3,952,574 | 77 | 11,162,113 | 2.82 |
+| **Week** | **10,144,599** | **26,536,356** | **611** | **81,686,969** | **3.08** |
+
+- The pushes with a known distinct commit count are the same pushes. Their distinct commits add up to 48,608,061 for the week, 1.83 per push.
+- A repository-day has 2.03 active hours on average.
+- 3 February has about 5 commits per push, the other days 2.2 to 3.0. The cause was not checked.
+- The ten repository-days with the most events are pushes of automated repositories, active in all 24 hours, with about one commit per push.
 
 ### How to read it
 
@@ -1292,3 +1322,4 @@ The medians in this table are estimates from the profiling run. The Gold tables 
 | 2026-11-17 | Step 8, G6, core columns. Section 14: the nine kinds and their Silver tables, each share is rounded on its own so the nine shares add up to 100 only within rounding, a share of 0.00 or 100.00 next to events of other kinds is correct, people and the label are taken across the nine tables, a repository-day without any actor has 0 people and a coverage of 0. More quality gates than planned (no count or share is NULL, each share lies between 0 and 100, a kind without events has the share 0, the coverage lies between 0 and 100 and exists exactly when the row has events, a row with actor-known events has at least one actor), the names of the gates, the content of the audit row, the expected sums and the events per day and kind. The optional columns follow in a second step. |
 | 2026-11-17 | First runs of G6 in Databricks. Status and section 14: the test notebook passed (13 of 13 sections, 180 checks), and the runs for one date and for all dates met every expected value. Section 14 has the results per day and kind, and the measured number of person-repository-days. No rule changed. |
 | 2026-11-17 | Step 8, G6, optional columns. Section 14: active hours in UTC over the nine kinds, push commits only over pushes with a known count (a sum over no known count is 0, next to an eligible count of 0), and the comment split of G4. A Gold table of the first version gets the eight columns with `ALTER TABLE ... ADD COLUMNS` at their place, and its old rows keep NULL in them until their day is rebuilt. Three more quality gates (`ACTIVE_HOURS_OUT_OF_RANGE`, `PUSH_COMMITS_OUT_OF_ORDER`, `TARGETS_DO_NOT_ADD_UP`), eight more quality numbers, and the expected values of the week. Section 15: the comment split of G6 and G4 is compared. |
+| 2026-11-17 | First runs of the G6 optional columns in Databricks. Status and section 14: the test notebook passed (13 of 13 sections, 208 checks), the first run added the eight columns to the table of the first version, and the runs for one date and for all dates met every expected value. Section 14 has the optional values per day. No rule changed. |
