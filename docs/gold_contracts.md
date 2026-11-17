@@ -10,7 +10,7 @@ This file is the single written source of truth for the six Gold tables of the G
 |---|---|
 | Data window | 2024-02-01 00:00 UTC up to, but not including, 2024-02-08 00:00 UTC (168 hourly GH Archive files) |
 | Based on | Completion Manual (Part IV and V), Silver Schema Reference, revised NULL and Quarantine Policy, the Silver notebooks on `main`, and the run of `00_gold_data_profiling` on 14 November 2026 |
-| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and two Gold tables, G2 (`02`) and G1 (`01`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G1 and G2 are the Gold tables built so far |
+| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and three Gold tables, G2 (`02`), G1 (`01`) and G4 (`04`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G1 and G2 are the Gold tables built so far. G4 is written and has not run in Databricks yet |
 
 ## Contents
 
@@ -652,16 +652,31 @@ Added to the manual's proposal: `repo_name`, `top_3_actor_events`. Actor IDs are
 
 | | |
 |---|---|
-| Sources | Three Silver tables: issue comment, pull request review and pull request review comment events. |
+| Sources | Three Silver tables: `silver.issue_comment_events`, `silver.pull_request_review_events` and `silver.pull_request_review_comment_events`. |
 | Grain | One row per repository per day with at least one event in the three tables. |
 | Key | `repo_id`, `activity_date` |
 
+### Three kinds of events
+
+| Kind | Silver table | What one event is |
+|---|---|---|
+| Issue comment | `issue_comment_events` | A comment in the conversation of an issue or of a pull request |
+| Review | `pull_request_review_events` | A review of a pull request, with a state such as `approved` |
+| Inline review comment | `pull_request_review_comment_events` | A comment on a line of code in a pull request |
+
+The three tables are placed under each other and counted as one list of events. They are never joined, because a join of raw events from two tables would multiply the rows.
+
 ### Rules
 
-- One event is one row. In this week every known action in the three tables is `created`, so edits and deletions do not appear. Two issue comment events have no action at all. They still count as events.
-- Issue comments are split by `comment_target_type`: `issue`, `pull_request` or unknown. Unknown stays unknown.
-- Review events are split by `review_state`. A missing state is not counted as any state.
-- People are counted once across all three tables: someone who comments and reviews is one collaborator.
+- One event is one row and is counted once. In this week every known action in the three tables is `created`, so edits and deletions do not appear and the action is not used. Two issue comment events have no action at all. They still count as events.
+- Issue comments are split by `comment_target_type`: `issue`, `pull_request` or unknown. Unknown means that the value is missing. Unknown stays unknown and is never counted as an issue.
+- Silver writes only these three targets. Any other value is in none of the three target columns, so the gate `TARGETS_DO_NOT_ADD_UP` fails and nothing is published.
+- Review events are split by `review_state`: `approved`, `changes_requested`, `commented`, `dismissed`, or another known state such as `pending`. The state is compared exactly as Silver stores it. A state written in another way, for example in capital letters, counts as another known state.
+- A review without a state is a review, but it is in none of the five state columns and not in `review_state_known_events`.
+- People are counted once across all three tables: someone who comments and reviews in the same repository on the same day is one collaborator.
+- An event without an actor is an event, but not a person. A repository-day whose events all have no actor has 0 people and a coverage of 0.
+- Every row has at least one event, so the coverage is never NULL.
+- The `repo_name` label is the name of the latest event with a name across the three tables, see section 5.
 
 ### Columns
 
@@ -685,7 +700,7 @@ Added to the manual's proposal: `repo_name`, `top_3_actor_events`. Actor IDs are
 | `collaboration_events_total` | `BIGINT` | Sum of the three event types |
 | `actor_known_events` | `BIGINT` | Events with a known actor |
 | `unique_collaborating_actors` | `BIGINT` | Different actors across the three tables |
-| `collaborator_actor_coverage_pct` | `DOUBLE` | 100 × actor-known ÷ total |
+| `collaborator_actor_coverage_pct` | `DOUBLE` | 100 × actor-known ÷ total, rounded to two decimals |
 | `_gold_run_id`, `_gold_updated_at` | | Technical columns, see section 5 |
 
 Added to the manual's proposal: `repo_name`, `review_dismissed_events`, `review_other_state_events`, `actor_known_events`.
@@ -693,28 +708,77 @@ Added to the manual's proposal: `repo_name`, `review_dismissed_events`, `review_
 ### Quality gates on every run
 
 - The key is unique and never NULL.
+- No count column is NULL.
 - The three target columns add up to `issue_comment_events`.
 - The five state columns add up to `review_state_known_events`, which is ≤ `review_events`.
 - The total equals the sum of the three event types.
-- Unique actors ≤ actor-known events ≤ total.
-- No `event_id` appears twice in the stacked input.
-- The count of each event type equals the Silver row count of its table for the same days.
+- Unique actors ≤ actor-known events ≤ total, and a row with actor-known events has at least one actor.
+- The coverage lies between 0 and 100.
+- A row has a coverage exactly when it has events.
+- No `event_id` appears twice in the stacked input. This check reads the stacked Silver rows of the affected days, because the Gold rows no longer carry event IDs.
+- The sum of each of the three event columns equals the Silver row count of its table for the same days. The Silver rows are counted directly on the Silver tables.
+
+The names of the gates, as they appear in `failed_checks`: `KEY_NOT_UNIQUE`, `KEY_IS_NULL`, `COUNT_IS_NULL`, `TARGETS_DO_NOT_ADD_UP`, `STATES_DO_NOT_ADD_UP`, `KNOWN_STATES_ABOVE_REVIEWS`, `TOTAL_IS_NOT_THE_SUM`, `ACTOR_COUNTS_OUT_OF_ORDER`, `COVERAGE_OUT_OF_RANGE`, `COVERAGE_DOES_NOT_FIT_ITS_BASE`, `EVENT_ID_NOT_UNIQUE`, `EVENT_SUM_DIFFERS_FROM_SILVER`.
+
+`EVENT_SUM_DIFFERS_FROM_SILVER` is one name for three comparisons, one per Silver table. The printed output of the notebook shows the three pairs of numbers.
+
+### The audit row
+
+| Column | Content for G4 |
+|---|---|
+| `source_rows_read` | Three keys, one per Silver table: `issue_comment_events`, `pull_request_review_events`, `pull_request_review_comment_events`. Each is the number of Silver rows on the affected days |
+| `rows_excluded` | Key `missing_event_date`: rows in the scope of the run without an event date, the three tables together |
+| `quality_metrics` | `repository_days` and the sums of the fifteen count columns over the rows of this run: `issue_comment_events`, `issue_conversation_comment_events`, `pr_conversation_comment_events`, `unclassified_conversation_comment_events`, `review_events`, `review_state_known_events`, `review_approved_events`, `review_changes_requested_events`, `review_commented_events`, `review_dismissed_events`, `review_other_state_events`, `inline_review_comment_events`, `collaboration_events_total`, `actor_known_events`, `unique_collaborating_actors` |
+
+After a run for all dates, these totals can be compared directly with the tables below. The sum of `unique_collaborating_actors` counts person-repository-days: a person is counted once for every repository and day on which they took part.
 
 ### Expected on the real week
 
 | Value | Expected |
 |---|---|
 | Rows | 444,720 |
-| Sum of `collaboration_events_total` | 2,497,518 (1,357,324 + 717,277 + 422,917) |
+| Sum of `collaboration_events_total` | 2,497,518 |
+| Sum of `issue_comment_events` | 1,357,324 |
+| Sum of `review_events` | 717,277 |
+| Sum of `inline_review_comment_events` | 422,917 |
 | Sum of `unclassified_conversation_comment_events` | 2 |
 | Sum of `review_state_known_events` | 717,277, because no review has a missing state |
+| Sum of `actor_known_events` | 2,497,518, because no Silver row has a missing actor. The coverage is 100 on every row |
+| Sum of `unique_collaborating_actors` | Not measured before the first run. It cannot be above 2,497,518 |
+
+The split by target and by state was measured only on the raw events, before repeated events were removed. Silver has 3 issue comment events and 8 review events fewer than the raw events, so each Gold sum should be at most that much lower:
+
+| Value | Raw events |
+|---|---|
+| Comments in pull request conversations | 838,179 |
+| Comments on issues | 519,146 |
+| Reviews: approved | 339,097 |
+| Reviews: commented | 323,312 |
+| Reviews: changes requested | 43,110 |
+| Reviews: dismissed | 11,744 |
+| Reviews: another state (`pending`) | 22 |
+
+Rows and events per day, for a run with one date:
+
+| Day | Rows | Collaboration events |
+|---|---|---|
+| 2024-02-01 | 75,896 | 449,194 |
+| 2024-02-02 | 67,275 | 393,209 |
+| 2024-02-03 | 37,985 | 171,153 |
+| 2024-02-04 | 37,587 | 174,277 |
+| 2024-02-05 | 82,181 | 438,816 |
+| 2024-02-06 | 73,223 | 444,097 |
+| 2024-02-07 | 70,573 | 426,772 |
+| **Week** | **444,720** | **2,497,518** |
 
 ### How to read it
 
 - The numbers count events. An approving review event is not the same as "the pull request was approved".
 - More comments do not mean better collaboration.
 - Most issue comment events are pull request conversations, about 62% in this week.
-- 38% of the issue comment events come from logins that end in `[bot]`.
+- 38% of the issue comment events come from logins that end in `[bot]`. `unique_collaborating_actors` counts accounts, and an account can be a bot.
+- 61% of the rows are built from one or two events. The count columns allow a reader to set a threshold.
+- The coverage of several rows together is calculated from the two sums. It is not the average of the coverages of the rows.
 
 ## 13. G5 `release_activity_shift`
 
@@ -1043,3 +1107,4 @@ The medians in this table are estimates from the profiling run. The Gold tables 
 | 2026-11-15 | First runs of G2 in Databricks. Status and section 10: the test notebook passed (13 of 13 sections, 135 checks), and the runs for one date and for all dates met every expected value. Section 10 has the results per day. No rule changed. |
 | 2026-11-16 | Step 6, G1. Section 9: a pull request number counts only inside its repository, a size of 0 is a known value, a repository-day without any pull request key still has a row, and an unknown action is in none of the four action columns. Three more quality gates (no count is NULL, the share lies between 0 and 100, a value exists exactly when its count is above 0), the names of the gates, the content of the audit row, and the expected rows and events per day. |
 | 2026-11-16 | First runs of G1 in Databricks. Status and section 9: the test notebook passed (13 of 13 sections, 153 checks), and the runs for one date and for all dates met every expected value. Section 9 has the results per day and the measured number of snapshots. No rule changed. |
+| 2026-11-17 | Step 7, G4. Section 12: the three kinds of events and their Silver tables, an unknown target is a missing value and any other value fails a gate, states are compared exactly as Silver stores them, a review without a state is in none of the state columns, a repository-day without any actor has 0 people and a coverage of 0. Three more quality gates (no count is NULL, the coverage lies between 0 and 100, a row has a coverage exactly when it has events) and one more condition in the actor gate (a row with actor-known events has at least one actor), the names of the gates, the content of the audit row, and the expected sums and the rows and events per day. |
