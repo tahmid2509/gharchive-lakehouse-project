@@ -10,7 +10,7 @@ This file is the single written source of truth for the six Gold tables of the G
 |---|---|
 | Data window | 2024-02-01 00:00 UTC up to, but not including, 2024-02-08 00:00 UTC (168 hourly GH Archive files) |
 | Based on | Completion Manual (Part IV and V), Silver Schema Reference, revised NULL and Quarantine Policy, the Silver notebooks on `main`, and the run of `00_gold_data_profiling` on 14 November 2026 |
-| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and three Gold tables, G2 (`02`), G1 (`01`) and G4 (`04`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G1 and G2 are the Gold tables built so far. G4 is written and has not run in Databricks yet |
+| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and three Gold tables, G2 (`02`), G1 (`01`) and G4 (`04`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G4 ran on the real data on 17 November 2026 (UTC): 444,720 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 158 checks. G1, G2 and G4 are the Gold tables built so far |
 
 ## Contents
 
@@ -771,6 +771,38 @@ Rows and events per day, for a run with one date:
 | 2024-02-07 | 70,573 | 426,772 |
 | **Week** | **444,720** | **2,497,518** |
 
+### Results on the real week
+
+The first two runs of G4 on the real data, on 17 November 2026 (UTC):
+
+| Run | Result |
+|---|---|
+| `source_date = 2024-02-03` | `SUCCEEDED`, no gate failed. 1 affected day, 171,153 Silver rows read (108,111 issue comment, 38,580 review and 24,462 inline review comment rows), 37,985 rows published with `REPLACE WHERE` |
+| All dates | `SUCCEEDED`, no gate failed. 7 affected days, 2,497,518 Silver rows read (1,357,324 issue comment, 717,277 review and 422,917 inline review comment rows), 444,720 rows published with `INSERT OVERWRITE` |
+
+- Every expected sum above was met exactly, and so were the rows and the events of every day.
+- The totals of 3 February were the same after both runs.
+- No row was without an event date, and no event ID appeared twice in the three tables together.
+- By target: 519,146 comments on issues, 838,176 in pull request conversations and 2 with an unknown target. The 2 are on 2 February and on 6 February.
+- By state: 339,096 approved, 43,110 changes requested, 323,305 commented, 11,744 dismissed and 22 in another state.
+- Compared with the raw events, the pull request conversations are 3 lower, approved is 1 lower and commented is 7 lower. The other four values are equal. These are exactly the 3 issue comment events and the 8 review events that Silver removed as repeated.
+- Every event has a known actor, so the coverage of the whole week is 100.
+- The sum of `unique_collaborating_actors` is 833,632 person-repository-days.
+- Each publish was one Delta commit: the Gold table was at version 1 after the first run and at version 2 after the second.
+
+| Day | Rows | Collaboration events | Issue comments | On issues | In pull request conversations | Reviews | Approved | Changes requested | Commented | Dismissed | Other state | Inline review comments | Actors |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2024-02-01 | 75,896 | 449,194 | 241,515 | 84,495 | 157,020 | 131,303 | 63,627 | 7,224 | 58,312 | 2,140 | 0 | 76,376 | 145,736 |
+| 2024-02-02 | 67,275 | 393,209 | 206,277 | 80,152 | 126,124 | 116,124 | 53,795 | 6,927 | 53,358 | 2,042 | 2 | 70,808 | 129,398 |
+| 2024-02-03 | 37,985 | 171,153 | 108,111 | 48,937 | 59,174 | 38,580 | 17,472 | 2,678 | 17,841 | 589 | 0 | 24,462 | 62,789 |
+| 2024-02-04 | 37,587 | 174,277 | 110,017 | 51,427 | 58,590 | 40,604 | 18,457 | 3,014 | 18,537 | 596 | 0 | 23,656 | 63,310 |
+| 2024-02-05 | 82,181 | 438,816 | 240,696 | 82,254 | 158,442 | 127,442 | 63,582 | 7,475 | 54,162 | 2,213 | 10 | 70,678 | 150,270 |
+| 2024-02-06 | 73,223 | 444,097 | 232,232 | 88,238 | 143,993 | 133,168 | 62,339 | 8,101 | 60,531 | 2,190 | 7 | 78,697 | 143,805 |
+| 2024-02-07 | 70,573 | 426,772 | 218,476 | 83,643 | 134,833 | 130,056 | 59,824 | 7,691 | 60,564 | 1,974 | 3 | 78,240 | 138,324 |
+| **Week** | **444,720** | **2,497,518** | **1,357,324** | **519,146** | **838,176** | **717,277** | **339,096** | **43,110** | **323,305** | **11,744** | **22** | **422,917** | **833,632** |
+
+In the table, the issue comments with an unknown target (2) and the reviews with a known state (equal to the reviews on every day) are left out.
+
 ### How to read it
 
 - The numbers count events. An approving review event is not the same as "the pull request was approved".
@@ -1108,3 +1140,4 @@ The medians in this table are estimates from the profiling run. The Gold tables 
 | 2026-11-16 | Step 6, G1. Section 9: a pull request number counts only inside its repository, a size of 0 is a known value, a repository-day without any pull request key still has a row, and an unknown action is in none of the four action columns. Three more quality gates (no count is NULL, the share lies between 0 and 100, a value exists exactly when its count is above 0), the names of the gates, the content of the audit row, and the expected rows and events per day. |
 | 2026-11-16 | First runs of G1 in Databricks. Status and section 9: the test notebook passed (13 of 13 sections, 153 checks), and the runs for one date and for all dates met every expected value. Section 9 has the results per day and the measured number of snapshots. No rule changed. |
 | 2026-11-17 | Step 7, G4. Section 12: the three kinds of events and their Silver tables, an unknown target is a missing value and any other value fails a gate, states are compared exactly as Silver stores them, a review without a state is in none of the state columns, a repository-day without any actor has 0 people and a coverage of 0. Three more quality gates (no count is NULL, the coverage lies between 0 and 100, a row has a coverage exactly when it has events) and one more condition in the actor gate (a row with actor-known events has at least one actor), the names of the gates, the content of the audit row, and the expected sums and the rows and events per day. |
+| 2026-11-17 | First runs of G4 in Databricks. Status and section 12: the test notebook passed (13 of 13 sections, 158 checks), and the runs for one date and for all dates met every expected value. Section 12 has the results per day, the measured split by target and by state, and the measured number of person-repository-days. No rule changed. |
