@@ -10,7 +10,7 @@ This file is the single written source of truth for the six Gold tables of the G
 |---|---|
 | Data window | 2024-02-01 00:00 UTC up to, but not including, 2024-02-08 00:00 UTC (168 hourly GH Archive files) |
 | Based on | Completion Manual (Part IV and V), Silver Schema Reference, revised NULL and Quarantine Policy, the Silver notebooks on `main`, and the run of `00_gold_data_profiling` on 14 November 2026 |
-| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and three Gold tables, G2 (`02`), G1 (`01`) and G4 (`04`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G4 ran on the real data on 17 November 2026 (UTC): 444,720 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 158 checks. G1, G2 and G4 are the Gold tables built so far |
+| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and four Gold tables, G2 (`02`), G1 (`01`), G4 (`04`) and the core columns of G6 (`06`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G4 ran on the real data on 17 November 2026 (UTC): 444,720 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 158 checks. G6 (core columns) ran on the real data on 17 November 2026 (UTC): 5,000,573 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 180 checks. G1, G2, G4 and G6 (core columns) are the Gold tables built so far |
 
 ## Contents
 
@@ -917,14 +917,37 @@ Notes on the rules:
 | | |
 |---|---|
 | Sources | All nine Silver tables. |
-| Grain | One row per repository per day with at least one retained event. |
+| Grain | One row per repository per day with at least one event in the nine tables. |
 | Key | `repo_id`, `activity_date` |
+
+The notebook `06_repository_activity_profile` builds the core columns. The optional columns follow in a second step, with their own pull request.
+
+### Nine kinds of events
+
+| Kind | Silver table | Gold column |
+|---|---|---|
+| Push | `push_events` | `push_events` |
+| Pull request | `pull_request_events` | `pull_request_events` |
+| Issue | `issue_events` | `issue_events` |
+| Issue comment | `issue_comment_events` | `issue_comment_events` |
+| Review | `pull_request_review_events` | `review_events` |
+| Inline review comment | `pull_request_review_comment_events` | `inline_review_comment_events` |
+| Watch (a new star) | `watch_events` | `watch_events` |
+| Fork | `fork_events` | `fork_events` |
+| Release | `release_events` | `release_events` |
+
+The nine tables are placed under each other and counted as one list of events. They are never joined, because a join of raw events from two tables would multiply the rows.
 
 ### Rules
 
-- Each event type is one category, and each event is in exactly one category. The nine counts therefore add up to the total.
-- A type without events has the count 0 and the share 0. That is a measured zero.
-- Shares use the total as their base. The total is never 0, because a row exists only when there is at least one event.
+- One event is one row and is counted once. Each event belongs to exactly one kind: the kind of the Silver table it comes from. The nine counts therefore add up to the total.
+- A kind without events has the count 0 and the share 0. That is a measured zero, never NULL.
+- A share is 100 × the count of the kind ÷ the total, rounded to two decimals. The total is never 0, because a row exists only when there is at least one event.
+- Each share is rounded on its own, so the nine shares of a row add up to 100 only within rounding. Nine shares can be off by up to 0.045 together, so the gate allows 99.95 to 100.05. Example: 90 events split 40, 15, 12, 8, 4, 3, 5, 2 and 1 give shares that add up to 99.99.
+- A share of 0.00 next to a count above 0 is correct, and so is a share of 100.00 next to events of other kinds: 1 watch event among 25,001 events has the share 0.00, and the 25,000 pushes have 100.00. The count columns hold the exact values.
+- People are counted once across all nine tables: someone who pushes, comments and stars in the same repository on the same day is one actor.
+- An event without an actor is an event, but not a person. A repository-day whose events all have no actor has 0 people and a coverage of 0.
+- The `repo_name` label is the name of the latest event with a name across the nine tables, see section 5.
 - Broader groups, such as "review" for reviews plus inline comments, are not stored. A report can add them from the nine counts.
 
 ### Core columns
@@ -944,15 +967,15 @@ Notes on the rules:
 | `watch_events` | `BIGINT` | Watch events |
 | `fork_events` | `BIGINT` | Fork events |
 | `release_events` | `BIGINT` | Release events |
-| `push_share_pct`, `pull_request_share_pct`, `issue_share_pct`, `issue_comment_share_pct`, `review_share_pct`, `inline_review_comment_share_pct`, `watch_share_pct`, `fork_share_pct`, `release_share_pct` | `DOUBLE` | One share per type: 100 × count ÷ total |
+| `push_share_pct`, `pull_request_share_pct`, `issue_share_pct`, `issue_comment_share_pct`, `review_share_pct`, `inline_review_comment_share_pct`, `watch_share_pct`, `fork_share_pct`, `release_share_pct` | `DOUBLE` | One share per type: 100 × count ÷ total, rounded to two decimals |
 | `actor_known_events` | `BIGINT` | Events with a known actor |
 | `unique_known_actors` | `BIGINT` | Different actors across all nine types |
-| `actor_attribution_coverage_pct` | `DOUBLE` | 100 × actor-known ÷ total |
+| `actor_attribution_coverage_pct` | `DOUBLE` | 100 × actor-known ÷ total, rounded to two decimals |
 | `_gold_run_id`, `_gold_updated_at` | | Technical columns, see section 5 |
 
 ### Optional columns, added in a second step
 
-They are placed after the core columns and before the two technical columns.
+They are placed after the core columns and before the two technical columns. They are not built yet.
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -970,11 +993,31 @@ In this week 611 push events have no usable commit counts.
 ### Quality gates on every run
 
 - The key is unique and never NULL.
+- No count column is NULL, and no share is NULL.
 - The nine counts add up to the total.
+- Each share lies between 0 and 100, and a kind without events has the share 0.
 - The nine shares add up to 100, within rounding (99.95 to 100.05).
-- Unique actors ≤ actor-known events ≤ total.
-- No `event_id` appears twice in the stacked input.
-- The count of each event type equals the Silver row count of its table for the same days.
+- Unique actors ≤ actor-known events ≤ total, and a row with actor-known events has at least one actor.
+- The coverage lies between 0 and 100.
+- A row has a coverage exactly when it has events.
+- No `event_id` appears twice in the stacked input. This check reads the stacked Silver rows of the affected days, because the Gold rows no longer carry event IDs.
+- The sum of each of the nine event columns equals the Silver row count of its table for the same days. The Silver rows are counted directly on the Silver tables.
+
+The names of the gates, as they appear in `failed_checks`: `KEY_NOT_UNIQUE`, `KEY_IS_NULL`, `COUNT_IS_NULL`, `TYPES_DO_NOT_ADD_UP`, `SHARE_IS_NULL`, `SHARE_OUT_OF_RANGE`, `SHARE_WITHOUT_EVENTS`, `SHARES_DO_NOT_ADD_UP`, `ACTOR_COUNTS_OUT_OF_ORDER`, `COVERAGE_OUT_OF_RANGE`, `COVERAGE_DOES_NOT_FIT_ITS_BASE`, `EVENT_ID_NOT_UNIQUE`, `EVENT_SUM_DIFFERS_FROM_SILVER`.
+
+`EVENT_SUM_DIFFERS_FROM_SILVER` is one name for nine comparisons, one per Silver table. The printed output of the notebook shows the nine pairs of numbers.
+
+Only two gates can be set off by a Silver row: `KEY_IS_NULL` (a row without `repo_id` or event date in the group) and `EVENT_ID_NOT_UNIQUE` (one event in two tables). The kind of an event is simply the table it comes from, so the other gates check the arithmetic of the notebook itself.
+
+### The audit row
+
+| Column | Content for G6 |
+|---|---|
+| `source_rows_read` | Nine keys, one per Silver table: `push_events`, `pull_request_events`, `issue_events`, `issue_comment_events`, `pull_request_review_events`, `pull_request_review_comment_events`, `watch_events`, `fork_events`, `release_events`. Each is the number of Silver rows on the affected days |
+| `rows_excluded` | Key `missing_event_date`: rows in the scope of the run without an event date, the nine tables together |
+| `quality_metrics` | `repository_days` and the sums of the twelve count columns over the rows of this run: `all_retained_event_count`, `push_events`, `pull_request_events`, `issue_events`, `issue_comment_events`, `review_events`, `inline_review_comment_events`, `watch_events`, `fork_events`, `release_events`, `actor_known_events`, `unique_known_actors` |
+
+After a run for all dates, these totals can be compared directly with the tables below. The sum of `unique_known_actors` counts person-repository-days: a person is counted once for every repository and day on which they took part.
 
 ### Expected on the real week
 
@@ -982,16 +1025,85 @@ In this week 611 push events have no usable commit counts.
 |---|---|
 | Rows | 5,000,573 |
 | Sum of `all_retained_event_count` | 33,623,791 |
-| Sum of each type column | The row count of its Silver table in section 1 |
-| `actor_attribution_coverage_pct` | 100.00 on every row |
+| Sum of `push_events` | 26,536,967 |
+| Sum of `pull_request_events` | 2,173,958 |
+| Sum of `issue_events` | 548,956 |
+| Sum of `issue_comment_events` | 1,357,324 |
+| Sum of `review_events` | 717,277 |
+| Sum of `inline_review_comment_events` | 422,917 |
+| Sum of `watch_events` | 1,380,559 |
+| Sum of `fork_events` | 326,417 |
+| Sum of `release_events` | 159,416 |
+| Sum of `actor_known_events` | 33,623,791, because no Silver row has a missing actor. The coverage is 100 on every row |
+| Sum of `unique_known_actors` | Not measured before the first run. It cannot be above 33,623,791 |
+
+Each type sum is the row count of its Silver table in section 1.
+
+Rows and events per day, for a run with one date:
+
+| Day | Rows | All events |
+|---|---|---|
+| 2024-02-01 | 780,577 | 4,931,231 |
+| 2024-02-02 | 735,149 | 4,944,140 |
+| 2024-02-03 | 579,908 | 4,447,005 |
+| 2024-02-04 | 602,850 | 4,441,124 |
+| 2024-02-05 | 763,841 | 4,789,485 |
+| 2024-02-06 | 777,905 | 4,999,343 |
+| 2024-02-07 | 760,343 | 5,071,463 |
+| **Week** | **5,000,573** | **33,623,791** |
+
+The events of each day by kind. Pull requests, issues and the three collaboration kinds are the results of G1, G2 and G4 in Databricks. Pushes and "watch + fork + release" are worked out from those results and the profiling numbers of G3 and G6, and they add up to the Silver row counts of section 1:
+
+| Day | Push | Pull request | Issue | Issue comment + review + inline | Watch + fork + release |
+|---|---|---|---|---|---|
+| 2024-02-01 | 3,723,327 | 387,295 | 90,166 | 449,194 | 281,249 |
+| 2024-02-02 | 3,858,570 | 332,523 | 82,090 | 393,209 | 277,748 |
+| 2024-02-03 | 3,793,533 | 197,802 | 58,419 | 171,153 | 226,098 |
+| 2024-02-04 | 3,761,468 | 189,714 | 58,167 | 174,277 | 257,498 |
+| 2024-02-05 | 3,604,406 | 388,940 | 83,467 | 438,816 | 273,856 |
+| 2024-02-06 | 3,843,012 | 345,716 | 88,826 | 444,097 | 277,692 |
+| 2024-02-07 | 3,952,651 | 331,968 | 87,821 | 426,772 | 272,251 |
+| **Week** | **26,536,967** | **2,173,958** | **548,956** | **2,497,518** | **1,866,392** |
+
+### Results on the real week
+
+The first two runs of G6 on the real data, on 17 November 2026 (UTC):
+
+| Run | Result |
+|---|---|
+| `source_date = 2024-02-03` | `SUCCEEDED`, no gate failed. 1 affected day, 4,447,005 Silver rows read in the nine tables together, 579,908 rows published with `REPLACE WHERE` |
+| All dates | `SUCCEEDED`, no gate failed. 7 affected days, 33,623,791 Silver rows read, 5,000,573 rows published with `INSERT OVERWRITE` |
+
+- Every expected value of the tables above was met exactly: the rows and the events of every day, and the events of every day by kind.
+- The totals of 3 February were the same after both runs.
+- No row was without an event date, and no event ID appeared twice in the nine tables together.
+- On every day, `pull_request_events` equals the pull request events of G1, `issue_events` the issue events of G2, and issue comments + reviews + inline review comments the events of G4.
+- Every event has a known actor, so the coverage is 100 on every row. The sum of `unique_known_actors` is 6,881,398 person-repository-days.
+- Pushes are 78.92% of all events of the week.
+- The rounding rule shows on real rows: on 3 February one repository has 63,650 pushes and 1 issue event. Its push share is 100.00 and its issue share is 0.00.
+- Each publish was one Delta commit: the Gold table was at version 1 after the first run and at version 2 after the second.
+
+The kinds not shown in the tables above, and the people:
+
+| Day | Rows | All events | Push | Watch | Fork | Release | Actors |
+|---|---|---|---|---|---|---|---|
+| 2024-02-01 | 780,577 | 4,931,231 | 3,723,327 | 205,001 | 50,016 | 26,232 | 1,086,727 |
+| 2024-02-02 | 735,149 | 4,944,140 | 3,858,570 | 206,010 | 47,587 | 24,151 | 1,021,146 |
+| 2024-02-03 | 579,908 | 4,447,005 | 3,793,533 | 168,900 | 38,301 | 18,897 | 759,547 |
+| 2024-02-04 | 602,850 | 4,441,124 | 3,761,468 | 197,635 | 41,636 | 18,227 | 805,632 |
+| 2024-02-05 | 763,841 | 4,789,485 | 3,604,406 | 202,311 | 48,037 | 23,508 | 1,068,809 |
+| 2024-02-06 | 777,905 | 4,999,343 | 3,843,012 | 202,413 | 50,999 | 24,280 | 1,085,320 |
+| 2024-02-07 | 760,343 | 5,071,463 | 3,952,651 | 198,289 | 49,841 | 24,121 | 1,054,217 |
+| **Week** | **5,000,573** | **33,623,791** | **26,536,967** | **1,380,559** | **326,417** | **159,416** | **6,881,398** |
 
 ### How to read it
 
 - The table shows a mix of event counts. It does not measure the amount of work or the health of a project.
 - Watch events are new stars only. Removed stars are not in the data.
 - Pushes are 78.9% of all events, so most repository-days are mostly pushes.
-- 63% of the rows are built from one or two events.
+- 63% of the rows are built from one or two events. The count columns allow a reader to set a threshold.
 - The repositories with the most events are automated. One repository has 64,783 events on a single day.
+- The share of several rows together is calculated from the sums. It is not the average of the shares of the rows.
 
 ## 15. The final Gold audit
 
@@ -1141,3 +1253,5 @@ The medians in this table are estimates from the profiling run. The Gold tables 
 | 2026-11-16 | First runs of G1 in Databricks. Status and section 9: the test notebook passed (13 of 13 sections, 153 checks), and the runs for one date and for all dates met every expected value. Section 9 has the results per day and the measured number of snapshots. No rule changed. |
 | 2026-11-17 | Step 7, G4. Section 12: the three kinds of events and their Silver tables, an unknown target is a missing value and any other value fails a gate, states are compared exactly as Silver stores them, a review without a state is in none of the state columns, a repository-day without any actor has 0 people and a coverage of 0. Three more quality gates (no count is NULL, the coverage lies between 0 and 100, a row has a coverage exactly when it has events) and one more condition in the actor gate (a row with actor-known events has at least one actor), the names of the gates, the content of the audit row, and the expected sums and the rows and events per day. |
 | 2026-11-17 | First runs of G4 in Databricks. Status and section 12: the test notebook passed (13 of 13 sections, 158 checks), and the runs for one date and for all dates met every expected value. Section 12 has the results per day, the measured split by target and by state, and the measured number of person-repository-days. No rule changed. |
+| 2026-11-17 | Step 8, G6, core columns. Section 14: the nine kinds and their Silver tables, each share is rounded on its own so the nine shares add up to 100 only within rounding, a share of 0.00 or 100.00 next to events of other kinds is correct, people and the label are taken across the nine tables, a repository-day without any actor has 0 people and a coverage of 0. More quality gates than planned (no count or share is NULL, each share lies between 0 and 100, a kind without events has the share 0, the coverage lies between 0 and 100 and exists exactly when the row has events, a row with actor-known events has at least one actor), the names of the gates, the content of the audit row, the expected sums and the events per day and kind. The optional columns follow in a second step. |
+| 2026-11-17 | First runs of G6 in Databricks. Status and section 14: the test notebook passed (13 of 13 sections, 180 checks), and the runs for one date and for all dates met every expected value. Section 14 has the results per day and kind, and the measured number of person-repository-days. No rule changed. |
