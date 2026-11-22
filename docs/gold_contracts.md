@@ -10,7 +10,7 @@ This file is the single written source of truth for the six Gold tables of the G
 |---|---|
 | Data window | 2024-02-01 00:00 UTC up to, but not including, 2024-02-08 00:00 UTC (168 hourly GH Archive files) |
 | Based on | Completion Manual (Part IV and V), Silver Schema Reference, revised NULL and Quarantine Policy, the Silver notebooks on `main`, and the run of `00_gold_data_profiling` on 14 November 2026 |
-| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and five Gold tables, G2 (`02`), G1 (`01`), G4 (`04`), G6 (`06`) and G3 (`03`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G4 ran on the real data on 17 November 2026 (UTC): 444,720 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 158 checks. G6 (core columns) ran on the real data on 17 November 2026 (UTC): 5,000,573 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 180 checks. The optional columns of G6 ran on the real data on 17 November 2026 (UTC), every expected value met. The extended test notebook passed on the same day: 13 of 13 sections, 208 checks. G3 (`03`) is written and tested locally, not run in Databricks yet. G1, G2, G4 and G6 are the Gold tables built so far |
+| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and five Gold tables, G2 (`02`), G1 (`01`), G4 (`04`), G6 (`06`) and G3 (`03`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G4 ran on the real data on 17 November 2026 (UTC): 444,720 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 158 checks. G6 (core columns) ran on the real data on 17 November 2026 (UTC): 5,000,573 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 180 checks. The optional columns of G6 ran on the real data on 17 November 2026 (UTC), every expected value met. The extended test notebook passed on the same day: 13 of 13 sections, 208 checks. G3 ran on the real data on 22 November 2026 (UTC): 4,318,172 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 174 checks. G1, G2, G3, G4 and G6 are the Gold tables built so far |
 
 ## Contents
 
@@ -670,7 +670,7 @@ After a run for all dates, these totals can be compared directly with the tables
 | Sum of `unique_active_actors` | Not measured before the first run. At least 833,632, the people of G4, whose three tables are part of these six. At most 6,881,398, the people of G6 over all nine tables |
 | Sums of the top counts, `single_actor_rows` | Not measured before the first run |
 
-Events per day, for a run with one date. Each day is the sum of the six Silver tables on that day: the events of G6 on that day without its watch, fork and release events. The rows per day were not measured before. On every day, this table has at most as many rows as G6.
+Events per day, for a run with one date. Each day is the sum of the six Silver tables on that day: the events of G6 on that day without its watch, fork and release events. The rows per day are the G3 rows of the profiling run in section 18. On every day, this table has at most as many rows as G6.
 
 | Day | Engineering events |
 |---|---|
@@ -682,6 +682,47 @@ Events per day, for a run with one date. Each day is the sum of the six Silver t
 | 2024-02-06 | 4,721,651 |
 | 2024-02-07 | 4,799,212 |
 | **Week** | **31,757,399** |
+
+### Results on the real week
+
+The first two runs of G3 on the real data, on 22 November 2026 (UTC):
+
+| Run | Result |
+|---|---|
+| `source_date = 2024-02-03` | `SUCCEEDED`, no gate failed. 1 affected day, 4,220,907 Silver rows read in the six tables together, 495,687 rows published with `REPLACE WHERE` |
+| All dates | `SUCCEEDED`, no gate failed. 7 affected days, 31,757,399 Silver rows read, 4,318,172 rows published with `INSERT OVERWRITE` |
+
+- Every expected value of the tables above was met exactly: the rows, the events of the week and the events of every day. The rows of every day are the G3 rows of section 18.
+- The totals of 3 February were the same after both runs.
+- No row was without an event date, and no event ID appeared twice in the six tables together.
+- The Silver rows read per table are the events of that kind in G6, for 3 February and for the week.
+- Every event has a known actor, so the coverage is 100 on every row and no row has NULL in its concentration values.
+- The sum of `unique_active_actors` is 5,282,093 person-repository-days: between the 833,632 of G4 and the 6,881,398 of G6, and below G6 on every day.
+- 3,819,869 rows (88.46%) have exactly one person. They hold 25,249,572 events, 79.51% of the week.
+- The most active person of each repository-day did 91.15% of the engineering events of the week, and the top 3 did 97.62%. On 3 and 4 February (a weekend) the most active person did about 95%, on the other days 89% to 91%.
+- The repository-day with the most people is `llvm/llvm-project` on 6 February: 329 people, a top share of 9.01 and an HHI of 0.0205.
+- Each publish was one Delta commit: the Gold table was at version 1 after the first run and at version 2 after the second.
+
+| Day | Rows | Engineering events | People | Top actor events | Top 3 actor events | Rows with one person |
+|---|---|---|---|---|---|---|
+| 2024-02-01 | 677,026 | 4,649,982 | 846,260 | 4,140,709 | 4,509,942 | 591,023 |
+| 2024-02-02 | 634,118 | 4,666,392 | 783,245 | 4,227,041 | 4,544,366 | 559,054 |
+| 2024-02-03 | 495,687 | 4,220,907 | 566,247 | 4,027,966 | 4,185,640 | 454,349 |
+| 2024-02-04 | 507,896 | 4,183,626 | 581,143 | 3,981,666 | 4,143,413 | 465,297 |
+| 2024-02-05 | 665,685 | 4,515,629 | 833,529 | 4,035,125 | 4,384,686 | 579,184 |
+| 2024-02-06 | 677,412 | 4,721,651 | 849,170 | 4,218,310 | 4,576,062 | 590,717 |
+| 2024-02-07 | 660,348 | 4,799,212 | 822,499 | 4,315,407 | 4,657,221 | 580,245 |
+| **Week** | **4,318,172** | **31,757,399** | **5,282,093** | **28,946,224** | **31,001,330** | **3,819,869** |
+
+The rows of the week by their number of people. The two averages are averages of the rows.
+
+| People | Rows | Engineering events | Average top share | Average HHI |
+|---|---|---|---|---|
+| 1 | 3,819,869 | 25,249,572 | 100.00 | 1.0000 |
+| 2 | 328,767 | 2,615,459 | 66.67 | 0.5892 |
+| 3 | 91,321 | 1,161,234 | 54.73 | 0.4417 |
+| 4 to 10 | 70,423 | 1,794,623 | 45.23 | 0.3264 |
+| More than 10 | 7,792 | 936,511 | 28.84 | 0.1621 |
 
 ### How to read it
 
@@ -1370,3 +1411,4 @@ The medians in this table are estimates from the profiling run. The Gold tables 
 | 2026-11-17 | Step 8, G6, optional columns. Section 14: active hours in UTC over the nine kinds, push commits only over pushes with a known count (a sum over no known count is 0, next to an eligible count of 0), and the comment split of G4. A Gold table of the first version gets the eight columns with `ALTER TABLE ... ADD COLUMNS` at their place, and its old rows keep NULL in them until their day is rebuilt. Three more quality gates (`ACTIVE_HOURS_OUT_OF_RANGE`, `PUSH_COMMITS_OUT_OF_ORDER`, `TARGETS_DO_NOT_ADD_UP`), eight more quality numbers, and the expected values of the week. Section 15: the comment split of G6 and G4 is compared. |
 | 2026-11-17 | First runs of the G6 optional columns in Databricks. Status and section 14: the test notebook passed (13 of 13 sections, 208 checks), the first run added the eight columns to the table of the first version, and the runs for one date and for all dates met every expected value. Section 14 has the optional values per day. No rule changed. |
 | 2026-11-17 | Step 9, G3. Section 11: the notebook does not read the watch, fork and release tables at all, the numbers are counted in two levels (each person, then the repository-day), the people are ranked for each repository-day on its own with ties broken by `actor_id`, the HHI is calculated from the squared events of each person, a repository-day without any attributable event has 0 people, a coverage of 0 and NULL in its five concentration values, and every value is rounded only once. More quality gates than planned (no count is NULL, a row with attributable events has at least one person, the top actor is at least the average person, the top 3 hold all events when there are three people or fewer, the concentration values exist exactly when the row has attributable events, the coverage lies between 0 and 100 and exists exactly when the row has events), the names of the gates, the content of the audit row, and the expected events per day. |
+| 2026-11-22 | First runs of G3 in Databricks. Status and section 11: the test notebook passed (13 of 13 sections, 174 checks), and the runs for one date and for all dates met every expected value. Section 11 has the results per day and by number of people, and the measured number of person-repository-days. The rows per day of G3 were already in section 18, so the sentence that they were not measured before is corrected, also in cell 11.2 of the notebook. No rule changed. |
