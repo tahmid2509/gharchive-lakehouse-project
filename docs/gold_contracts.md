@@ -10,7 +10,7 @@ This file is the single written source of truth for the six Gold tables of the G
 |---|---|
 | Data window | 2024-02-01 00:00 UTC up to, but not including, 2024-02-08 00:00 UTC (168 hourly GH Archive files) |
 | Based on | Completion Manual (Part IV and V), Silver Schema Reference, revised NULL and Quarantine Policy, the Silver notebooks on `main`, and the run of `00_gold_data_profiling` on 14 November 2026 |
-| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and four Gold tables, G2 (`02`), G1 (`01`), G4 (`04`) and G6 (`06`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G4 ran on the real data on 17 November 2026 (UTC): 444,720 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 158 checks. G6 (core columns) ran on the real data on 17 November 2026 (UTC): 5,000,573 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 180 checks. The optional columns of G6 ran on the real data on 17 November 2026 (UTC), every expected value met. The extended test notebook passed on the same day: 13 of 13 sections, 208 checks. G1, G2, G4 and G6 are the Gold tables built so far |
+| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and five Gold tables, G2 (`02`), G1 (`01`), G4 (`04`), G6 (`06`) and G3 (`03`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G4 ran on the real data on 17 November 2026 (UTC): 444,720 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 158 checks. G6 (core columns) ran on the real data on 17 November 2026 (UTC): 5,000,573 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 180 checks. The optional columns of G6 ran on the real data on 17 November 2026 (UTC), every expected value met. The extended test notebook passed on the same day: 13 of 13 sections, 208 checks. G3 ran on the real data on 22 November 2026 (UTC): 4,318,172 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 174 checks. G1, G2, G3, G4 and G6 are the Gold tables built so far |
 
 ## Contents
 
@@ -592,13 +592,22 @@ The first two runs of G2 on the real data, on 15 November 2026 (UTC):
 | Grain | One row per repository per day with at least one event in the six tables. |
 | Key | `repo_id`, `activity_date` |
 
+The notebook `03_repository_contributor_concentration` builds this table. It places the six tables under each other, as G6 does with nine. They are never joined, because a join of raw events from two tables would multiply the rows.
+
 ### Rules
 
-- One engineering activity event is one row from the six tables. Watch, fork and release events are not included.
+- One engineering activity event is one row from the six tables, and it is counted once. Watch, fork and release events are not included. The notebook does not read their tables at all: they do not count, their actors are not people of this table, they do not give the label, and a new watch, fork or release event does not make its day an affected day.
 - An event is attributable when `actor_id` is known. Events without an actor are counted separately and never given to a made-up person.
-- All shares use the attributable events as their base.
-- The HHI is the sum of the squared shares of all actors, with shares as fractions. It is 1 when one person did everything and moves towards 0 as the work spreads out.
+- All shares and the HHI use the attributable events as their base, not all events. With 5 events of one person, 3 of another and 2 without an actor, the top share is 5 of 8 = 62.5.
+- The numbers are counted in two levels: first the events of each person on the repository-day, then, from those, the repository-day. People are counted once across the six tables: someone who pushes and reviews on the same day is one person.
+- The people of a repository-day are ranked by their events, the most active first, for each repository and day on its own. The top 3 are the three people with the most events, together. With three people or fewer, the top 3 are everybody.
+- When two people have the same number of events, the smaller `actor_id` is ranked first. Actor IDs are not published, and which of the two is first changes no value in the table.
+- The HHI is the sum of the squared shares of all people, with the shares as fractions. It is calculated as (the sum of each person's events squared) ÷ attributable events². It is 1 when one person did everything and moves towards 0 as the work spreads out. With n people it is at least 1 ÷ n.
+- A repository-day without any attributable event has 0 people and a coverage of 0. Its top counts, shares and HHI are NULL, because there is nobody to rank.
+- Every row has at least one event, so the coverage is never NULL.
+- Every value is calculated from the exact counts and rounded only once: the shares and the coverage to 2 decimals, the HHI to 4.
 - Every actor is kept, including bots (decision 6).
+- The `repo_name` label is the name of the latest event with a name across the six tables, see section 5.
 
 ### Columns
 
@@ -606,16 +615,16 @@ The first two runs of G2 on the real data, on 15 November 2026 (UTC):
 |---|---|---|
 | `repo_id` | `BIGINT` | Key |
 | `activity_date` | `DATE` | Key. The UTC event date |
-| `repo_name` | `STRING` | Label: the latest name seen that day |
+| `repo_name` | `STRING` | Label: the latest name seen that day in the six tables |
 | `engineering_activity_events` | `BIGINT` | All events from the six tables that day |
 | `attributable_events` | `BIGINT` | Events with a known actor |
 | `unattributable_events` | `BIGINT` | Events without a known actor. The two add up to the total |
 | `actor_coverage_pct` | `DOUBLE` | 100 × attributable ÷ total |
 | `unique_active_actors` | `BIGINT` | Different actors that day. 0 when no event is attributable |
 | `top_actor_events` | `BIGINT` | Events of the most active actor. NULL when no event is attributable |
-| `top_actor_share_pct` | `DOUBLE` | 100 × top actor events ÷ attributable events |
+| `top_actor_share_pct` | `DOUBLE` | 100 × top actor events ÷ attributable events. NULL when no event is attributable |
 | `top_3_actor_events` | `BIGINT` | Events of the three most active actors together. NULL when no event is attributable |
-| `top_3_actor_share_pct` | `DOUBLE` | 100 × top 3 actor events ÷ attributable events |
+| `top_3_actor_share_pct` | `DOUBLE` | 100 × top 3 actor events ÷ attributable events. NULL when no event is attributable |
 | `hhi_actor_activity` | `DOUBLE` | Concentration index from 0 to 1, with 4 decimals. NULL when no event is attributable |
 | `_gold_run_id`, `_gold_updated_at` | | Technical columns, see section 5 |
 
@@ -624,27 +633,105 @@ Added to the manual's proposal: `repo_name`, `top_3_actor_events`. Actor IDs are
 ### Quality gates on every run
 
 - The key is unique and never NULL.
+- No count column is NULL: all events, attributable, unattributable and people.
 - Attributable + unattributable = all events.
-- Actors ≤ attributable events, and top ≤ top 3 ≤ attributable events.
-- Shares lie between 0 and 100. The HHI lies between 1 ÷ actors and 1, within rounding (0.0001).
-- No `event_id` appears twice in the stacked input.
-- The sum of `engineering_activity_events` equals the Silver rows of the six tables for the same days.
+- People ≤ attributable events, and a row with attributable events has at least one person.
+- For a row with people: 1 ≤ top ≤ top 3 ≤ attributable events, the top actor has at least as many events as the average person (top × people ≥ attributable events), and with three people or fewer the top 3 hold all attributable events.
+- A row with attributable events has all five concentration values. A row without attributable events has none of them.
+- The two shares lie between 0 and 100. The HHI lies between 1 ÷ people and 1, within rounding (0.0001).
+- The coverage lies between 0 and 100, and a row has a coverage exactly when it has events.
+- No `event_id` appears twice in the stacked input. This check reads the stacked Silver rows of the affected days, because the Gold rows no longer carry event IDs.
+- The sum of `engineering_activity_events` equals the Silver rows of the six tables for the same days. The Silver rows are counted directly on the Silver tables.
+
+The names of the gates, as they appear in `failed_checks`: `KEY_NOT_UNIQUE`, `KEY_IS_NULL`, `COUNT_IS_NULL`, `ATTRIBUTION_DOES_NOT_ADD_UP`, `ACTOR_COUNTS_OUT_OF_ORDER`, `TOP_COUNTS_OUT_OF_ORDER`, `CONCENTRATION_DOES_NOT_FIT_ITS_BASE`, `SHARE_OUT_OF_RANGE`, `HHI_OUT_OF_RANGE`, `COVERAGE_OUT_OF_RANGE`, `COVERAGE_DOES_NOT_FIT_ITS_BASE`, `EVENT_ID_NOT_UNIQUE`, `EVENT_SUM_DIFFERS_FROM_SILVER`.
+
+This table has no column per kind of event, so `EVENT_SUM_DIFFERS_FROM_SILVER` compares one sum: all events of the staged rows against the Silver rows of the six tables together.
+
+Two gates can be set off by a Silver row that Silver itself would never write: `KEY_IS_NULL` (a row without `repo_id`) and `EVENT_ID_NOT_UNIQUE` (one event in two tables). A row without `repo_id` also sets off `CONCENTRATION_DOES_NOT_FIT_ITS_BASE`: the top counts are joined on the key, and in SQL `NULL = NULL` is not true, so that row finds no top counts. The other gates check the arithmetic of the notebook itself.
+
+### The audit row
+
+| Column | Content for G3 |
+|---|---|
+| `source_rows_read` | Six keys, one per Silver table: `push_events`, `pull_request_events`, `issue_events`, `issue_comment_events`, `pull_request_review_events`, `pull_request_review_comment_events`. Each is the number of Silver rows on the affected days |
+| `rows_excluded` | Key `missing_event_date`: rows in the scope of the run without an event date, the six tables together |
+| `quality_metrics` | Nine numbers over the rows of this run: `repository_days`, the sums of `engineering_activity_events`, `attributable_events`, `unattributable_events`, `unique_active_actors`, `top_actor_events` and `top_3_actor_events`, and two row counts: `rows_without_attributable_events` (rows whose concentration values are NULL) and `single_actor_rows` (rows with exactly one person) |
+
+After a run for all dates, these totals can be compared directly with the tables below. The sum of `unique_active_actors` counts person-repository-days: a person is counted once for every repository and day on which they worked.
 
 ### Expected on the real week
 
 | Value | Expected |
 |---|---|
 | Rows | 4,318,172 |
-| Sum of `engineering_activity_events` | 31,757,399 |
+| Sum of `engineering_activity_events` | 31,757,399: the rows of the six Silver tables |
 | Sum of `unattributable_events` | 0, so `actor_coverage_pct` is 100.00 on every row |
+| `rows_without_attributable_events` | 0 |
+| Sum of `unique_active_actors` | Not measured before the first run. At least 833,632, the people of G4, whose three tables are part of these six. At most 6,881,398, the people of G6 over all nine tables |
+| Sums of the top counts, `single_actor_rows` | Not measured before the first run |
+
+Events per day, for a run with one date. Each day is the sum of the six Silver tables on that day: the events of G6 on that day without its watch, fork and release events. The rows per day are the G3 rows of the profiling run in section 18. On every day, this table has at most as many rows as G6.
+
+| Day | Engineering events |
+|---|---|
+| 2024-02-01 | 4,649,982 |
+| 2024-02-02 | 4,666,392 |
+| 2024-02-03 | 4,220,907 |
+| 2024-02-04 | 4,183,626 |
+| 2024-02-05 | 4,515,629 |
+| 2024-02-06 | 4,721,651 |
+| 2024-02-07 | 4,799,212 |
+| **Week** | **31,757,399** |
+
+### Results on the real week
+
+The first two runs of G3 on the real data, on 22 November 2026 (UTC):
+
+| Run | Result |
+|---|---|
+| `source_date = 2024-02-03` | `SUCCEEDED`, no gate failed. 1 affected day, 4,220,907 Silver rows read in the six tables together, 495,687 rows published with `REPLACE WHERE` |
+| All dates | `SUCCEEDED`, no gate failed. 7 affected days, 31,757,399 Silver rows read, 4,318,172 rows published with `INSERT OVERWRITE` |
+
+- Every expected value of the tables above was met exactly: the rows, the events of the week and the events of every day. The rows of every day are the G3 rows of section 18.
+- The totals of 3 February were the same after both runs.
+- No row was without an event date, and no event ID appeared twice in the six tables together.
+- The Silver rows read per table are the events of that kind in G6, for 3 February and for the week.
+- Every event has a known actor, so the coverage is 100 on every row and no row has NULL in its concentration values.
+- The sum of `unique_active_actors` is 5,282,093 person-repository-days: between the 833,632 of G4 and the 6,881,398 of G6, and below G6 on every day.
+- 3,819,869 rows (88.46%) have exactly one person. They hold 25,249,572 events, 79.51% of the week.
+- The most active person of each repository-day did 91.15% of the engineering events of the week, and the top 3 did 97.62%. On 3 and 4 February (a weekend) the most active person did about 95%, on the other days 89% to 91%.
+- The repository-day with the most people is `llvm/llvm-project` on 6 February: 329 people, a top share of 9.01 and an HHI of 0.0205.
+- Each publish was one Delta commit: the Gold table was at version 1 after the first run and at version 2 after the second.
+
+| Day | Rows | Engineering events | People | Top actor events | Top 3 actor events | Rows with one person |
+|---|---|---|---|---|---|---|
+| 2024-02-01 | 677,026 | 4,649,982 | 846,260 | 4,140,709 | 4,509,942 | 591,023 |
+| 2024-02-02 | 634,118 | 4,666,392 | 783,245 | 4,227,041 | 4,544,366 | 559,054 |
+| 2024-02-03 | 495,687 | 4,220,907 | 566,247 | 4,027,966 | 4,185,640 | 454,349 |
+| 2024-02-04 | 507,896 | 4,183,626 | 581,143 | 3,981,666 | 4,143,413 | 465,297 |
+| 2024-02-05 | 665,685 | 4,515,629 | 833,529 | 4,035,125 | 4,384,686 | 579,184 |
+| 2024-02-06 | 677,412 | 4,721,651 | 849,170 | 4,218,310 | 4,576,062 | 590,717 |
+| 2024-02-07 | 660,348 | 4,799,212 | 822,499 | 4,315,407 | 4,657,221 | 580,245 |
+| **Week** | **4,318,172** | **31,757,399** | **5,282,093** | **28,946,224** | **31,001,330** | **3,819,869** |
+
+The rows of the week by their number of people. The two averages are averages of the rows.
+
+| People | Rows | Engineering events | Average top share | Average HHI |
+|---|---|---|---|---|
+| 1 | 3,819,869 | 25,249,572 | 100.00 | 1.0000 |
+| 2 | 328,767 | 2,615,459 | 66.67 | 0.5892 |
+| 3 | 91,321 | 1,161,234 | 54.73 | 0.4417 |
+| 4 to 10 | 70,423 | 1,794,623 | 45.23 | 0.3264 |
+| More than 10 | 7,792 | 936,511 | 28.84 | 0.1621 |
 
 ### How to read it
 
-- A repository with one active person on a day has a top share of 100 by definition. Compare only repository-days with enough events. 59% of the rows are built from one or two events.
+- A repository with one active person on a day has a top share of 100 and an HHI of 1 by definition. Compare only repository-days with enough events and people. 59% of the rows are built from one or two events.
 - Bots are actors in version 1. Logins that end in `[bot]` produce 17.5% of the engineering events of the week.
 - The largest accounts are automation with an ordinary login. The single most active account produced 16.9% of all engineering events in only 30 repositories, and the 20 most active accounts together produced about 48%. A filter on `[bot]` would not remove them. Any list of "most active repositories" is led by automated repositories.
 - One event is not one unit of work: a push with 100 commits is one event.
 - Pushes are 83.6% of the input, so the result mostly reflects who pushes.
+- The share of several rows together is calculated from the sums. It is not the average of the shares of the rows.
 
 ## 12. G4 `repository_collaboration_metrics`
 
@@ -1323,3 +1410,5 @@ The medians in this table are estimates from the profiling run. The Gold tables 
 | 2026-11-17 | First runs of G6 in Databricks. Status and section 14: the test notebook passed (13 of 13 sections, 180 checks), and the runs for one date and for all dates met every expected value. Section 14 has the results per day and kind, and the measured number of person-repository-days. No rule changed. |
 | 2026-11-17 | Step 8, G6, optional columns. Section 14: active hours in UTC over the nine kinds, push commits only over pushes with a known count (a sum over no known count is 0, next to an eligible count of 0), and the comment split of G4. A Gold table of the first version gets the eight columns with `ALTER TABLE ... ADD COLUMNS` at their place, and its old rows keep NULL in them until their day is rebuilt. Three more quality gates (`ACTIVE_HOURS_OUT_OF_RANGE`, `PUSH_COMMITS_OUT_OF_ORDER`, `TARGETS_DO_NOT_ADD_UP`), eight more quality numbers, and the expected values of the week. Section 15: the comment split of G6 and G4 is compared. |
 | 2026-11-17 | First runs of the G6 optional columns in Databricks. Status and section 14: the test notebook passed (13 of 13 sections, 208 checks), the first run added the eight columns to the table of the first version, and the runs for one date and for all dates met every expected value. Section 14 has the optional values per day. No rule changed. |
+| 2026-11-17 | Step 9, G3. Section 11: the notebook does not read the watch, fork and release tables at all, the numbers are counted in two levels (each person, then the repository-day), the people are ranked for each repository-day on its own with ties broken by `actor_id`, the HHI is calculated from the squared events of each person, a repository-day without any attributable event has 0 people, a coverage of 0 and NULL in its five concentration values, and every value is rounded only once. More quality gates than planned (no count is NULL, a row with attributable events has at least one person, the top actor is at least the average person, the top 3 hold all events when there are three people or fewer, the concentration values exist exactly when the row has attributable events, the coverage lies between 0 and 100 and exists exactly when the row has events), the names of the gates, the content of the audit row, and the expected events per day. |
+| 2026-11-22 | First runs of G3 in Databricks. Status and section 11: the test notebook passed (13 of 13 sections, 174 checks), and the runs for one date and for all dates met every expected value. Section 11 has the results per day and by number of people, and the measured number of person-repository-days. The rows per day of G3 were already in section 18, so the sentence that they were not measured before is corrected, also in cell 11.2 of the notebook. No rule changed. |
