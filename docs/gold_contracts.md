@@ -10,7 +10,7 @@ This file is the single written source of truth for the six Gold tables of the G
 |---|---|
 | Data window | 2024-02-01 00:00 UTC up to, but not including, 2024-02-08 00:00 UTC (168 hourly GH Archive files) |
 | Based on | Completion Manual (Part IV and V), Silver Schema Reference, revised NULL and Quarantine Policy, the Silver notebooks on `main`, and the run of `00_gold_data_profiling` on 14 November 2026 |
-| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and five Gold tables, G2 (`02`), G1 (`01`), G4 (`04`), G6 (`06`) and G3 (`03`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G4 ran on the real data on 17 November 2026 (UTC): 444,720 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 158 checks. G6 (core columns) ran on the real data on 17 November 2026 (UTC): 5,000,573 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 180 checks. The optional columns of G6 ran on the real data on 17 November 2026 (UTC), every expected value met. The extended test notebook passed on the same day: 13 of 13 sections, 208 checks. G3 ran on the real data on 22 November 2026 (UTC): 4,318,172 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 174 checks. G1, G2, G3, G4 and G6 are the Gold tables built so far |
+| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and all six Gold tables, G2 (`02`), G1 (`01`), G4 (`04`), G6 (`06`), G3 (`03`) and G5 (`05`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G4 ran on the real data on 17 November 2026 (UTC): 444,720 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 158 checks. G6 (core columns) ran on the real data on 17 November 2026 (UTC): 5,000,573 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 180 checks. The optional columns of G6 ran on the real data on 17 November 2026 (UTC), every expected value met. The extended test notebook passed on the same day: 13 of 13 sections, 208 checks. G3 ran on the real data on 22 November 2026 (UTC): 4,318,172 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 174 checks. G5 ran on the real data on 22 November 2026 (UTC): 108,295 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 179 checks. All six Gold tables are built |
 
 ## Contents
 
@@ -195,6 +195,13 @@ What this guarantees:
 ### G5
 
 A release needs data from the day before and the day after, so one new day can make older releases eligible. G5 is rebuilt completely on every run, whatever `source_date` says. It is small: 159,416 release events.
+
+1. **Scope.** `processing_scope` is always `ALL_DATES`. A valid `source_date` is checked and written into the audit row, but it changes nothing in what the run reads or writes. A source date without Silver rows therefore still rebuilds the whole table and is not `NO_INPUT`.
+2. **Build, stage and check** as for the daily tables, from all Silver rows and the manifest.
+3. **Publish** with `INSERT OVERWRITE`, as one Delta commit. A release that is no longer an anchor disappears.
+4. **Audit.** `affected_dates` lists the event dates of the release events. G5 has no days of its own.
+
+The status is `NO_INPUT` only when Silver has no release event at all. When there are release events but none of them is an anchor, the run succeeds and replaces the table with an empty one, and the notebook prints a warning. The usual reason is a manifest whose hours are not complete.
 
 ### Status
 
@@ -930,6 +937,8 @@ Notes on the rules:
 - **Rule 6.** A release is identified by `repo_id` plus `release_id`. "Earliest" means the smallest `event_timestamp`. If two events share it, the smaller `event_id` is used. An event that already failed an earlier rule never takes the place of a valid one.
 - **Rule 6 is not about copies.** Of the 408 releases with more than one event, 318 carry different published times. They are rolling releases, for example with the tag `nightly`, which are published again under the same release ID. Only their first publication in the week becomes an anchor.
 - **Rule 7** was measured by time only: a release fits when it was published from 2024-02-02 00:00:00 to 2024-02-07 00:00:00 UTC, both included. The real run also asks the manifest whether every hour of the two windows is complete.
+- **Rule 7 is checked only for the earliest event of a release.** The other events of the release already have their reason, `REPEATED_RELEASE_EVENT`. So when the windows of the earliest event are not covered, the release has no anchor: that event counts as `WINDOW_NOT_COVERED` and the later ones as repeated events, even if a later one would have fitted. The profiling run applied the rules in the same order.
+- An hour that is not in the manifest at all, for example an hour of 31 January, is not complete.
 - A release tag is a label. The week has 158,588 releases but only 140,971 different tags per repository, so tags are reused.
 
 ### Window rules
@@ -937,8 +946,8 @@ Notes on the rules:
 - r is `release_published_at`. It is never replaced by the event time or the ingestion time.
 - The before window runs from r − 24 hours up to, but not including, r. The after window runs from r up to, but not including, r + 24 hours.
 - An event exactly at r counts in the after window. An event exactly at r + 24 hours is outside both windows.
-- Rule 7 needs 48 complete hourly files when r is exactly on the hour, otherwise 49.
-- Activity is matched by `repo_id` and `event_timestamp`. A row without an event time cannot be placed and is counted as left out.
+- Rule 7 needs 48 complete hourly files when r is exactly on the hour, otherwise 49. The window touches every hour from the hour in which r − 24 hours lies up to the last hour that starts before r + 24 hours. Example: r = 4 February 12:30 touches the hours 3 February 12:00 to 5 February 12:00, 49 hours.
+- Activity is matched by `repo_id` and `event_timestamp`. A row without an event time cannot be placed. It is left out and counted in `rows_excluded` under the key `missing_event_timestamp`.
 - A window without activity gives 0. That is a measured zero, because the window is fully covered.
 - Push commit counts and pull request commit counts are never added together.
 
@@ -972,12 +981,37 @@ Notes on the rules:
 
 ### Quality gates on every run
 
-- The key is unique, and the row count equals the number of eligible anchors.
+- The key is unique and never NULL.
+- The anchor values are never NULL: `release_id`, `release_published_at`, `is_prerelease`, `anchor_event_id` and the two window columns.
+- `release_anchor_key` is the `release_id` written as text.
+- The row count equals the number of anchors.
+- Anchors plus all failure reasons equal the number of release events. The release events are counted directly on the Silver table.
+- No count column is NULL.
 - Before and after totals equal the sum of their five type columns.
-- Change = after − before. The percent change is NULL exactly when before is 0.
-- Every window lies inside complete hours.
-- Commit-eligible push events ≤ push events.
-- Eligible anchors plus all failure reasons equal the number of release events.
+- Change = after − before. The percent change is 100 × change ÷ before, rounded to 2 decimals, and NULL exactly when before is 0. The baseline flag is true exactly when before is 0.
+- `window_start_at` is r − 24 hours and `window_end_at` is r + 24 hours.
+- Every window lies inside complete hours. This gate asks the manifest again, from the window columns of the staged rows.
+- Commit-eligible push events ≤ push events, the known commits are never negative, and a window without an eligible push has 0 known commits.
+- No `event_id` appears twice in the six Silver tables together.
+
+The names of the gates, as they appear in `failed_checks`: `KEY_NOT_UNIQUE`, `KEY_IS_NULL`, `ANCHOR_VALUE_IS_NULL`, `ANCHOR_KEY_DIFFERS_FROM_RELEASE_ID`, `ROWS_DIFFER_FROM_ANCHORS`, `REASONS_DO_NOT_ADD_UP`, `COUNT_IS_NULL`, `TOTALS_DO_NOT_ADD_UP`, `CHANGE_DOES_NOT_FIT`, `WINDOW_DOES_NOT_FIT_ITS_RELEASE`, `WINDOW_NOT_COMPLETE`, `PUSH_COMMITS_OUT_OF_ORDER`, `EVENT_ID_NOT_UNIQUE`.
+
+Two gates can be set off by a Silver row that Silver itself would never write: `KEY_IS_NULL` (a valid release without `repo_id`) and `EVENT_ID_NOT_UNIQUE` (one event in two tables). The other gates check the arithmetic of the notebook itself.
+
+No gate compares the sums of the activity counts with Silver. The windows of releases that are close together overlap, so one event can be counted for several rows, and most events lie in no window at all.
+
+### The audit row
+
+| Column | Content for G5 |
+|---|---|
+| `processing_scope` | Always `ALL_DATES` |
+| `source_date` | The parameter, or NULL. It does not limit the run |
+| `affected_dates` | The event dates of the release events |
+| `source_rows_read` | Six keys, one per Silver table: `release_events`, `push_events`, `pull_request_events`, `issue_events`, `watch_events`, `fork_events`. Each is the number of rows of that table |
+| `rows_excluded` | Key `missing_event_timestamp`: activity rows without an event time, the five tables together |
+| `quality_metrics` | 14 numbers: `release_events`, `anchors`, the seven reasons under their own names (`NOT_PUBLISHED` to `WINDOW_NOT_COVERED`), `prerelease_anchors`, `baseline_zero_rows`, `rows_without_activity` (0 before and 0 after), `manifest_hours` and `complete_hours` |
+
+No sum of the activity counts is written into the audit row, for the same reason as above.
 
 ### Expected on the real week
 
@@ -986,13 +1020,50 @@ Notes on the rules:
 | Rows | 108,295, when every hour is complete in the manifest |
 | Rows with `is_prerelease` true | 13,586 |
 | Rows + all failure reasons | 159,416 |
+| Failure reasons | The column "Expected" of the anchor rules above |
+| `manifest_hours`, `complete_hours` | 168 and 168, as measured by the manifest run of 15 November 2026 |
+| Rows without an event time | 0 |
+| `baseline_zero_rows`, `rows_without_activity` | Not measured before the first run. The first run measured 26,136 and 21,228 |
+| The activity counts | Not measured before the first run, and not in the audit row |
+
+### Results on the real week
+
+The first two runs of G5 on the real data, on 22 November 2026 (UTC):
+
+| Run | Result |
+|---|---|
+| `source_date = 2024-02-03` | `SUCCEEDED`, no gate failed. Scope `ALL_DATES`, 159,416 release events checked, 108,295 rows published with `INSERT OVERWRITE` |
+| Blank `source_date` | `SUCCEEDED`, no gate failed. The same 108,295 rows, published with `INSERT OVERWRITE` |
+
+- Every expected value of the table above was met exactly: 108,295 anchors, 13,586 prereleases, 278 `DRAFT_OR_UNKNOWN`, 740 `REPEATED_RELEASE_EVENT`, 50,103 `WINDOW_NOT_COVERED`, 0 for the other four reasons, and 159,416 release events together.
+- The manifest had 168 hours, all complete.
+- Both runs gave the same table: the same reasons, the same rows per day and the same ten rows of the sample. Only the run ID differed, so the source date changed nothing, as section 6 says.
+- The Silver rows read per table are the row counts of section 1.
+- No activity row was without an event time, and no event ID appeared twice in the six tables together.
+- The anchors belong to 45,475 repositories.
+- 26,136 rows (24.13%) have no activity before the release, so their percent change is empty. 21,228 of them have no activity after it either.
+- 56,145 rows (51.84%) have less activity in the 24 hours after the release than before it, 24,225 (22.37%) have more, and 27,925 (25.79%) have the same, most of them because they have no activity at all.
+- The first anchor was published on 2 February at 00:00:02 UTC. The last was published on 7 February at exactly 00:00:00 UTC, so its after window ends exactly at the end of the week. It is the only anchor of 7 February.
+- Each publish was one Delta commit: the Gold table was at version 1 after the first run and at version 2 after the second.
+
+| Day of the release | Rows | Prereleases | Baseline zero | More after | Less after |
+|---|---|---|---|---|---|
+| 2024-02-02 | 24,012 | 3,084 | 5,344 | 4,208 | 13,926 |
+| 2024-02-03 | 18,727 | 2,071 | 5,199 | 4,057 | 9,203 |
+| 2024-02-04 | 18,061 | 2,328 | 4,902 | 4,108 | 8,764 |
+| 2024-02-05 | 23,366 | 3,036 | 5,347 | 6,409 | 11,334 |
+| 2024-02-06 | 24,128 | 3,067 | 5,344 | 5,443 | 12,917 |
+| 2024-02-07 | 1 | 0 | 0 | 0 | 1 |
+| **Week** | **108,295** | **13,586** | **26,136** | **24,225** | **56,145** |
+
+The day of the release is the UTC date of `release_published_at`. 1 February has no row, because no release of that day has 24 hours of the week before it.
 
 ### How to read it
 
 - It is a before-and-after comparison, not proof that the release caused the change.
 - Windows of releases that are close together overlap. Do not add rows up across releases.
 - The day of the week and the time of day also change activity.
-- Releases from the first and last 24 hours of the week are not in the table.
+- Releases from the first 24 hours of the week and releases after 7 February 00:00 UTC are not in the table. A release at exactly 7 February 00:00:00 UTC just fits, and the real week has one.
 - One source hour is thin: on 5 February 2024 from about 19:24 to 20:00 UTC, Bronze holds far fewer events than usual (section 8). A release published in the 24 hours before these minutes has them in its after window, so its after count is slightly low and the change looks more negative than it was. A release published in the 24 hours after them, until 6 February 20:00 UTC, has them in its before window, so its before count is slightly low and the change looks more positive than it was. Over all event types and repositories, about 2% of the events of such a 24-hour window are missing. That is an estimate, and for one repository it can be more or less.
 - A release often comes with its own pushes, which count as activity.
 - Many releases are published by automation. 7,416 of the 62,125 repositories with releases have no activity event in the whole week, so many rows show 0 before and 0 after, an empty percentage and `baseline_zero_flag` true. That is a real result.
@@ -1305,6 +1376,8 @@ Each Gold notebook has a test notebook in `Notebooks/Gold_layer/tests/`.
 | Failed check | Bad toy data makes a gate fail: Gold stays unchanged and the status is `FAILED`. |
 | Bad parameter | An invalid `source_date`, `test_schema` or `run_id` stops the notebook before any write. |
 
+G5 is rebuilt completely, so "Other days untouched" and "A day that is gone" do not apply to it. Its test proves instead that a run for one source date, also a date without Silver rows, rebuilds the whole table, and that an hour that is not complete removes the releases whose windows touch it until the hour is complete again.
+
 A test notebook runs the real notebook with `%run`. A cell that is expected to fail says so in the text before it. "Run all" stops at such a cell, and the test goes on with "Run all below" from the cell after it. The checks count runs, not audit rows, so it does no harm if such a cell runs twice.
 
 Every check section writes its number of failed checks into one dictionary. The cell "Result of the whole test" near the end reads it and prints `TEST PASSED` only when every section ran and every check passed. A section that failed or was left out is named.
@@ -1412,3 +1485,5 @@ The medians in this table are estimates from the profiling run. The Gold tables 
 | 2026-11-17 | First runs of the G6 optional columns in Databricks. Status and section 14: the test notebook passed (13 of 13 sections, 208 checks), the first run added the eight columns to the table of the first version, and the runs for one date and for all dates met every expected value. Section 14 has the optional values per day. No rule changed. |
 | 2026-11-17 | Step 9, G3. Section 11: the notebook does not read the watch, fork and release tables at all, the numbers are counted in two levels (each person, then the repository-day), the people are ranked for each repository-day on its own with ties broken by `actor_id`, the HHI is calculated from the squared events of each person, a repository-day without any attributable event has 0 people, a coverage of 0 and NULL in its five concentration values, and every value is rounded only once. More quality gates than planned (no count is NULL, a row with attributable events has at least one person, the top actor is at least the average person, the top 3 hold all events when there are three people or fewer, the concentration values exist exactly when the row has attributable events, the coverage lies between 0 and 100 and exists exactly when the row has events), the names of the gates, the content of the audit row, and the expected events per day. |
 | 2026-11-22 | First runs of G3 in Databricks. Status and section 11: the test notebook passed (13 of 13 sections, 174 checks), and the runs for one date and for all dates met every expected value. Section 11 has the results per day and by number of people, and the measured number of person-repository-days. The rows per day of G3 were already in section 18, so the sentence that they were not measured before is corrected, also in cell 11.2 of the notebook. No rule changed. |
+| 2026-11-22 | Step 10, G5. Section 6: how a run of G5 works, the scope is always `ALL_DATES`, the source date is only written into the audit row, `NO_INPUT` only without any release event, and an empty table with a warning when no release is an anchor. Section 13: rule 7 is checked only for the earliest event of a release, an hour missing from the manifest is not complete, how the touched hours are counted, rows without an event time go to `missing_event_timestamp`. More quality gates than planned (the key is never NULL, the anchor values are never NULL, the key is the release ID as text, no count is NULL, the percent change has its exact value, the baseline flag fits, the windows fit r, no known commits without an eligible push, no event ID twice), the names of the gates, the content of the audit row, and what is expected on the real week. Section 16: what the G5 test proves instead of the two tests about days. |
+| 2026-11-23 | First runs of G5 in Databricks. Status and section 13: the test notebook passed (13 of 13 sections, 179 checks), and the runs with and without a source date met every expected value and gave the same table. Section 13 has the results per day of the release and the measured numbers of baseline-zero rows and rows without activity. The sentence about the first and last 24 hours of the week is made exact, also in the notebook. No rule changed. |
