@@ -10,7 +10,7 @@ This file is the single written source of truth for the six Gold tables of the G
 |---|---|
 | Data window | 2024-02-01 00:00 UTC up to, but not including, 2024-02-08 00:00 UTC (168 hourly GH Archive files) |
 | Based on | Completion Manual (Part IV and V), Silver Schema Reference, revised NULL and Quarantine Policy, the Silver notebooks on `main`, and the run of `00_gold_data_profiling` on 14 November 2026 |
-| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and all six Gold tables, G2 (`02`), G1 (`01`), G4 (`04`), G6 (`06`), G3 (`03`) and G5 (`05`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G4 ran on the real data on 17 November 2026 (UTC): 444,720 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 158 checks. G6 (core columns) ran on the real data on 17 November 2026 (UTC): 5,000,573 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 180 checks. The optional columns of G6 ran on the real data on 17 November 2026 (UTC), every expected value met. The extended test notebook passed on the same day: 13 of 13 sections, 208 checks. G3 ran on the real data on 22 November 2026 (UTC): 4,318,172 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 174 checks. G5 ran on the real data on 22 November 2026 (UTC): 108,295 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 179 checks. All six Gold tables are built |
+| Status | Rules and decisions approved on 14 November 2026. Written so far: the Gold setup (`08`), the source-hour manifest (`07`) and all six Gold tables, G2 (`02`), G1 (`01`), G4 (`04`), G6 (`06`), G3 (`03`) and G5 (`05`), and the final Gold audit (`09`). The manifest ran on the real data on 15 November 2026: 168 hours, all complete. Its test notebook passed in Databricks on the same day: 12 of 12 sections, 145 checks. G2 ran on the real data on 15 November 2026 (UTC): 194,627 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 135 checks. G1 ran on the real data on 16 November 2026 (UTC): 700,486 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 153 checks. G4 ran on the real data on 17 November 2026 (UTC): 444,720 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 158 checks. G6 (core columns) ran on the real data on 17 November 2026 (UTC): 5,000,573 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 180 checks. The optional columns of G6 ran on the real data on 17 November 2026 (UTC), every expected value met. The extended test notebook passed on the same day: 13 of 13 sections, 208 checks. G3 ran on the real data on 22 November 2026 (UTC): 4,318,172 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 174 checks. G5 ran on the real data on 22 November 2026 (UTC): 108,295 rows, every expected value met. Its test notebook passed in Databricks on the same day: 13 of 13 sections, 179 checks. All six Gold tables are built. The final audit is written and waits for its first run |
 
 ## Contents
 
@@ -57,7 +57,7 @@ Every Silver table has the common columns `event_id`, `event_type`, `event_times
 
 | # | Rule | In practice |
 |---|---|---|
-| 1 | Gold reads only Silver. | Never Bronze and never another Gold table. The one addition is G5, which also reads the source-hour manifest. |
+| 1 | Gold reads only Silver. | Never Bronze and never another Gold table. The one addition is G5, which also reads the source-hour manifest. The final audit (section 15) reads the six Gold tables to check them, and builds no table. |
 | 2 | Every table has a declared grain. | The grain is the meaning of one row. Each run checks that no key appears twice. |
 | 3 | IDs are keys, names are labels. | Group and join on `repo_id` and `actor_id`. `repo_name` and `actor_login` are for display only. |
 | 4 | Event counts and entity counts are different things. | Four events about one pull request are four events and one pull request. Column names say which is counted: `..._events` and `..._actions` count events, `..._rows` counts the rows a number was calculated from, `distinct_...` and `unique_...` count things or people. |
@@ -215,7 +215,7 @@ A run with a blank date replaces the whole table. It is also the way to remove a
 
 ## 7. The Gold audit table
 
-`github_lakehouse.audit.gold_pipeline_runs` gets exactly one row per run of a Gold notebook. The manifest notebook writes its row here too, with the manifest as `gold_table`.
+`github_lakehouse.audit.gold_pipeline_runs` gets exactly one row per run of a Gold notebook. The manifest notebook writes its row here too, with the manifest as `gold_table`. The final audit writes its row here too, with `gold_table` NULL, because it writes no table (section 15).
 
 | Column | Type | Meaning |
 |---|---|---|
@@ -1330,27 +1330,89 @@ The optional values per day:
 
 ## 15. The final Gold audit
 
-`09_gold_final_audit` runs after the six tables. It writes one audit row and fails its task if any check fails.
+`09_gold_final_audit` runs after the six tables. It reads them, compares them with Silver and with each other, writes one audit row and fails its task if any check fails. It writes no Gold table.
 
-| Check | Expected on the full week |
+| Check | Names in `failed_checks` | Expected on the full week |
+|---|---|---|
+| Every Gold table: key unique and never NULL | `G1_KEY_NOT_UNIQUE`, `G1_KEY_IS_NULL`, and the same for G2 to G6 | 0 violations |
+| G1: rows and sum of `pr_event_count` | `G1_ROWS_DIFFER_FROM_SILVER`, `G1_EVENTS_DIFFER_FROM_SILVER` | 700,486 and 2,173,958 |
+| G2: rows and sum of `issue_event_count` | `G2_ROWS_...`, `G2_EVENTS_...` | 194,627 and 548,956 |
+| G3: rows and sum of `engineering_activity_events` | `G3_ROWS_...`, `G3_EVENTS_...` | 4,318,172 and 31,757,399 |
+| G4: rows and sum of `collaboration_events_total` | `G4_ROWS_...`, `G4_EVENTS_...` | 444,720 and 2,497,518 |
+| G6: rows and sum of `all_retained_event_count` | `G6_ROWS_...`, `G6_EVENTS_...` | 5,000,573 and 33,623,791 |
+| G6: each of the nine kind columns = the rows of its Silver table | `G6_KIND_DIFFERS_FROM_SILVER` | The rows of section 1 |
+| G5 rows + G5 failure reasons | `G5_DOES_NOT_ADD_UP_TO_SILVER` | 159,416, the number of release events |
+| G6 `pull_request_events` = G1 `pr_event_count`, for every repository-day | `G6_PULL_REQUESTS_DIFFER_FROM_G1` | Equal |
+| G6 `issue_events` = G2 `issue_event_count`, for every repository-day | `G6_ISSUES_DIFFER_FROM_G2` | Equal |
+| G6 six engineering types = G3 total | `G6_ENGINEERING_DIFFERS_FROM_G3` | Equal |
+| G6 issue comments + reviews + inline comments = G4 total | `G6_COLLABORATION_DIFFERS_FROM_G4` | Equal |
+| G6 comment split = G4 comment split, for every repository-day | `G6_COMMENT_SPLIT_DIFFERS_FROM_G4` | Equal |
+| Actors in G6 ≥ actors in G3 ≥ actors in G4, for every repository-day | `ACTORS_G6_BELOW_G3`, `ACTORS_G3_BELOW_G4` | True |
+| Every repository-day of G1 to G4 exists in G6 | `G1_TO_G4_ROW_NOT_IN_G6` | True |
+| Every G5 repository exists in G6 | `G5_REPOSITORY_NOT_IN_G6` | True |
+
+These are 33 checks: 12 for the keys, 12 of Gold against Silver and 9 of Gold against Gold. They run in the order of the table, and `failed_checks` names the failed ones in that order. The fixed numbers above are written here for a person to compare with, they are not built into the code. The audit compares Gold with Silver and Gold with Gold.
+
+### How the checks are made
+
+- **Rows of a daily table.** G1, G2, G3, G4 and G6 have one row for every repository and day with at least one event of their kinds. So the rows of a table must be the number of different (`repo_id`, `event_date`) pairs in its Silver tables, and the sum of its event column must be the number of those Silver rows.
+- **G5.** G5 checks every release event against seven rules (section 13), so its rows plus the seven reasons of its run add up to all release events. The audit takes the seven reasons from the newest `SUCCEEDED` audit row of `gold_release_activity_shift` for the same Gold table. When there is no such run, the check fails. When Silver got release events after that run, the sum is too small and the check fails too: G5 has to run again.
+- **Gold against Gold.** A `FULL OUTER JOIN` on `repo_id` and `activity_date` keeps the rows of both tables, also a row without a partner, and a missing number counts as 0. A G6 row with 0 pull request events and no G1 row is therefore not a difference. The two checks of people use a `LEFT JOIN` from G3 to G6 and from G4 to G3, and a missing row counts as 0 people.
+- **Every G5 repository exists in G6.** A release event is one of the nine kinds of G6, so a repository with an anchor has at least one G6 row on some day.
+
+### All dates and one date
+
+| | Blank `source_date` | A `source_date` |
+|---|---|---|
+| `processing_scope` | `ALL_DATES` | `SINGLE_DATE` |
+| Days compared | The whole Gold tables against all Silver rows with an event date | The affected days of that source date, on both sides: the event dates of the Silver rows with that `_source_date`, in any of the nine tables |
+| Always whole tables | The key checks, both G5 checks | The same |
+| `NO_INPUT` | Silver has no row with an event date | No Silver row with that source date has an event date |
+
+A run for all dates reads every Gold row, also a row whose day no longer exists in Silver. With one date, these are the days that G6 rebuilds for that date (section 6). Each other daily table rebuilds the part of them that has its own kinds. A Silver row without an event date cannot be placed on a day, so it is left out and counted under `missing_event_date`, as in the Gold notebooks.
+
+With `NO_INPUT` no check runs. The run still writes its audit row and does not fail. On the real week, all seven days are compared, because every row has an event date and `event_date` always equals `_source_date` (section 18).
+
+### The audit row
+
+The final audit writes one row into `audit.gold_pipeline_runs` (section 7), with the 18 columns of every Gold run. Some of them mean something a little different, because it writes no table:
+
+| Column | Value |
 |---|---|
-| Every Gold table: key unique and never NULL | 0 violations |
-| G1: rows and sum of `pr_event_count` | 700,486 and 2,173,958 |
-| G2: rows and sum of `issue_event_count` | 194,627 and 548,956 |
-| G3: rows and sum of `engineering_activity_events` | 4,318,172 and 31,757,399 |
-| G4: rows and sum of `collaboration_events_total` | 444,720 and 2,497,518 |
-| G6: rows and sum of `all_retained_event_count` | 5,000,573 and 33,623,791 |
-| G6 `pull_request_events` = G1 `pr_event_count`, for every repository-day | Equal |
-| G6 `issue_events` = G2 `issue_event_count`, for every repository-day | Equal |
-| G6 issue comments + reviews + inline comments = G4 total | Equal |
-| G6 comment split = G4 comment split, for every repository-day | Equal |
-| G6 six engineering types = G3 total | Equal |
-| Actors in G6 ≥ actors in G3 ≥ actors in G4, for every repository-day | True |
-| Every repository-day of G1 to G4 exists in G6 | True |
-| Every G5 repository exists in G6 | True |
-| G5 rows + G5 failure reasons | 159,416, the number of release events |
+| `pipeline_name` | `gold_final_audit` |
+| `gold_table` | NULL |
+| `affected_dates` | The days that were compared |
+| `source_rows_read` | The Silver rows on those days, one key per Silver table, with the table names of section 1 |
+| `rows_excluded` | `missing_event_date`: Silver rows in the scope of the run without an event date |
+| `gold_rows_published` | 0 |
+| `gold_table_version` | NULL |
+| `checks_passed`, `failed_checks` | As for the quality gates of a Gold notebook, with the check names of the table above |
+| `quality_metrics` | `checks_run` and `checks_failed`; `g1_rows`, `g1_events` and the same for G2, G3, G4 and G6, on the days compared; `g5_rows`; `g5_left_out_release_events`, the seven reasons of the last successful G5 run, NULL when there is none; `silver_release_events_all_days` |
 
-For a run with one date, the audit compares the same days on both sides instead of the week totals. The audit compares Gold with Silver and Gold with Gold. The fixed numbers above are written here for a person to compare with, they are not built into the code.
+When a check fails, the audit row is written first, with the status `FAILED`. Then the notebook stops with an error, so the Job task fails too.
+
+### Expected on the real week
+
+A run with all widgets blank must give `SUCCEEDED` with these `quality_metrics`:
+
+| Key | Expected |
+|---|---|
+| `checks_run`, `checks_failed` | 33 and 0 |
+| `g1_rows`, `g1_events` | 700,486 and 2,173,958 |
+| `g2_rows`, `g2_events` | 194,627 and 548,956 |
+| `g3_rows`, `g3_events` | 4,318,172 and 31,757,399 |
+| `g4_rows`, `g4_events` | 444,720 and 2,497,518 |
+| `g6_rows`, `g6_events` | 5,000,573 and 33,623,791 |
+| `g5_rows`, `g5_left_out_release_events` | 108,295 and 51,121 (278 + 740 + 50,103) |
+| `silver_release_events_all_days` | 159,416 |
+
+`source_rows_read` must hold the rows of section 1, `missing_event_date` must be 0, and `affected_dates` the seven days of the week. A run with one source date compares the rows of that day in section 18. For `source_date = 2024-02-03`: G1 68,242 rows and 197,802 events, G2 19,824 and 58,419, G3 495,687 and 4,220,907, G4 37,985 and 171,153, G6 579,908 and 4,447,005, and G5 as a whole as above.
+
+### What `SUCCEEDED` does not prove
+
+The audit proves that the six tables agree with Silver and with each other in their rows, counts and people. It does not prove that a value inside a row is right, for example a median, a share or a percent change. That is what the test notebook of each Gold table proves.
+
+When a check fails, its line in step 7.1 of the notebook shows the number found and the number expected. The usual reason is a Gold table that was not rebuilt after Silver changed: run its Gold notebook again for the same source date, then the audit.
 
 ## 16. Tests
 
@@ -1377,6 +1439,8 @@ Each Gold notebook has a test notebook in `Notebooks/Gold_layer/tests/`.
 | Bad parameter | An invalid `source_date`, `test_schema` or `run_id` stops the notebook before any write. |
 
 G5 is rebuilt completely, so "Other days untouched" and "A day that is gone" do not apply to it. Its test proves instead that a run for one source date, also a date without Silver rows, rebuilds the whole table, and that an hour that is not complete removes the releases whose windows touch it until the hour is complete again.
+
+The test of the final audit builds the six Gold tables with the six real Gold notebooks in its test schema, and then runs the audit on them. It proves: no input; the exact numbers of hand-made rows for all dates and for one date, also a day before the source date that got a late row; that the audit writes no Gold table; that each of the 33 checks fails, with the number worked out by hand, on tables broken on purpose in one cell; recovery with `RESTORE TABLE`; that a late Silver row fails the audit until its Gold tables are rebuilt for its source date; bad parameters; and that no production table changed.
 
 A test notebook runs the real notebook with `%run`. A cell that is expected to fail says so in the text before it. "Run all" stops at such a cell, and the test goes on with "Run all below" from the cell after it. The checks count runs, not audit rows, so it does no harm if such a cell runs twice.
 
@@ -1487,3 +1551,4 @@ The medians in this table are estimates from the profiling run. The Gold tables 
 | 2026-11-22 | First runs of G3 in Databricks. Status and section 11: the test notebook passed (13 of 13 sections, 174 checks), and the runs for one date and for all dates met every expected value. Section 11 has the results per day and by number of people, and the measured number of person-repository-days. The rows per day of G3 were already in section 18, so the sentence that they were not measured before is corrected, also in cell 11.2 of the notebook. No rule changed. |
 | 2026-11-22 | Step 10, G5. Section 6: how a run of G5 works, the scope is always `ALL_DATES`, the source date is only written into the audit row, `NO_INPUT` only without any release event, and an empty table with a warning when no release is an anchor. Section 13: rule 7 is checked only for the earliest event of a release, an hour missing from the manifest is not complete, how the touched hours are counted, rows without an event time go to `missing_event_timestamp`. More quality gates than planned (the key is never NULL, the anchor values are never NULL, the key is the release ID as text, no count is NULL, the percent change has its exact value, the baseline flag fits, the windows fit r, no known commits without an eligible push, no event ID twice), the names of the gates, the content of the audit row, and what is expected on the real week. Section 16: what the G5 test proves instead of the two tests about days. |
 | 2026-11-23 | First runs of G5 in Databricks. Status and section 13: the test notebook passed (13 of 13 sections, 179 checks), and the runs with and without a source date met every expected value and gave the same table. Section 13 has the results per day of the release and the measured numbers of baseline-zero rows and rows without activity. The sentence about the first and last 24 hours of the week is made exact, also in the notebook. No rule changed. |
+| 2026-11-23 | Step 11, the final Gold audit. Section 15: the name of each check in `failed_checks`, one more check (each kind column of G6 against its Silver table), the rows of each daily table against the repository-days of Silver, how G5 is added up from its last successful run, how the tables are joined, which checks always read whole tables, `NO_INPUT`, the content of the audit row, what is expected on the real week, and what `SUCCEEDED` does not prove. Rule 1 and section 7: the audit reads the Gold tables and writes its row with `gold_table` NULL. Section 16: what the test of the audit proves. |
